@@ -74,7 +74,7 @@ if not df_raw.empty:
     # --- 2. PREMISSAS DE CÁLCULO (INTERATIVAS) ---
     with st.sidebar:
         st.header("⚙️ Premissas de Cálculo")
-        st.caption("Versão: 1.2 (Com Análise por Andar)") # Indicador visual da versão
+        st.caption("Versão: 1.3 (Sazonalidade + CO2)") # Indicador visual da versão
         st.markdown("Ajuste as horas de uso para refinar a estimativa mensal.")
         
         horas_ar = st.slider("Horas/Dia - Ar Condicionado", 0, 24, 8)
@@ -82,6 +82,10 @@ if not df_raw.empty:
         horas_pc = st.slider("Horas/Dia - Computadores", 0, 24, 9)
         dias_mes = st.number_input("Dias úteis por mês", value=22)
         tarifa_kwh = st.number_input("Tarifa de Energia (R$/kWh)", value=0.90)
+        
+        st.divider()
+        st.markdown("🌱 **Fator de Emissão CO2**")
+        fator_co2 = st.number_input("kg CO2 por kWh (Méd. BR)", value=0.086, format="%.3f")
 
     # --- 3. CATEGORIZAÇÃO E CÁLCULOS ---
     # Função para mapear categorias do CSV para grupos maiores
@@ -123,9 +127,10 @@ if not df_raw.empty:
 
     df_raw['Economia_Estimada_R$'] = df_raw.apply(lambda x: x['Custo_Mensal_R$'] * fator_economia.get(x['Categoria_Macro'], 0), axis=1)
     df_raw['Custo_Projetado_R$'] = df_raw['Custo_Mensal_R$'] - df_raw['Economia_Estimada_R$']
+    df_raw['Economia_kWh'] = df_raw['Consumo_Mensal_kWh'] * df_raw['Categoria_Macro'].map(fator_economia).fillna(0)
 
     # Agrupando dados para o Dashboard
-    df_dashboard = df_raw.groupby('Categoria_Macro')[['Custo_Mensal_R$', 'Custo_Projetado_R$', 'Economia_Estimada_R$']].sum().reset_index()
+    df_dashboard = df_raw.groupby('Categoria_Macro')[['Custo_Mensal_R$', 'Custo_Projetado_R$', 'Economia_Estimada_R$', 'Consumo_Mensal_kWh', 'Economia_kWh']].sum().reset_index()
 
     # --- 5. VISUALIZAÇÃO NO STREAMLIT ---
 
@@ -133,61 +138,114 @@ if not df_raw.empty:
     total_custo = df_dashboard['Custo_Mensal_R$'].sum()
     total_economia = df_dashboard['Economia_Estimada_R$'].sum()
     total_novo = df_dashboard['Custo_Projetado_R$'].sum()
+    
+    # KPIs Ambientais
+    total_economia_kwh = df_dashboard['Economia_kWh'].sum()
+    co2_evitado_kg = total_economia_kwh * fator_co2
+    arvores_equivalentes = int(co2_evitado_kg / 15) # Estimativa: 1 árvore absorve ~15kg CO2/ano
 
-    kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric("Fatura Mensal Estimada (Atual)", f"R$ {total_custo:,.2f}")
-    kpi2.metric("Potencial de Economia", f"R$ {total_economia:,.2f}", delta="42% estimado")
-    kpi3.metric("Fatura Projetada (Pós-Reforma)", f"R$ {total_novo:,.2f}", delta_color="inverse")
+    col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+    col_kpi1.metric("Fatura Mensal (Atual)", f"R$ {total_custo:,.2f}")
+    col_kpi2.metric("Economia Estimada", f"R$ {total_economia:,.2f}", delta="42%")
+    col_kpi3.metric("CO2 Evitado (Mensal)", f"{co2_evitado_kg:.1f} kg", delta="Sustentabilidade")
+    col_kpi4.metric("Árvores Salvas (Eq.)", f"{arvores_equivalentes} árvores", help="Equivalente em árvores plantadas para absorver esse CO2 em 1 ano.")
 
     st.divider()
-
-    # Gráficos Principais
-    col_chart1, col_chart2 = st.columns(2)
-
-    with col_chart1:
-        st.subheader("📊 Distribuição de Custos por Tipo")
-        fig_pie = px.pie(df_dashboard, values='Custo_Mensal_R$', names='Categoria_Macro', 
-                         hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-    with col_chart2:
-        st.subheader("📉 Comparativo de Economia por Setor")
-        fig_bar = go.Figure()
-        fig_bar.add_trace(go.Bar(x=df_dashboard['Categoria_Macro'], y=df_dashboard['Custo_Mensal_R$'], name='Custo Atual', marker_color='#EF553B'))
-        fig_bar.add_trace(go.Bar(x=df_dashboard['Categoria_Macro'], y=df_dashboard['Custo_Projetado_R$'], name='Custo Otimizado', marker_color='#00CC96'))
-        fig_bar.update_layout(barmode='group', xaxis_title="Categoria", yaxis_title="Custo (R$)")
-        st.plotly_chart(fig_bar, use_container_width=True)
     
-    # --- NOVO: VISUALIZAÇÃO POR ANDAR ---
-    st.divider()
-    st.subheader("🏢 Análise de Custo por Andar")
-    
-    # Agrupa por andar e ordena
-    df_andar = df_raw.groupby('num_andar')[['Custo_Mensal_R$']].sum().reset_index()
-    
-    # Tenta ordenar numericamente se possível, senão alfabeticamente
-    try:
-        df_andar['sort_key'] = pd.to_numeric(df_andar['num_andar'])
-        df_andar = df_andar.sort_values('sort_key')
-    except:
-        df_andar = df_andar.sort_values('num_andar')
+    # --- ABAS PARA ORGANIZAR O CONTEÚDO ---
+    tab1, tab2, tab3 = st.tabs(["📊 Visão Geral", "📅 Sazonalidade (Anual)", "🏢 Detalhes por Andar"])
 
-    fig_andar = px.bar(
-        df_andar, 
-        x='num_andar', 
-        y='Custo_Mensal_R$', 
-        color='Custo_Mensal_R$',
-        color_continuous_scale='Reds',
-        labels={'num_andar': 'Andar', 'Custo_Mensal_R$': 'Custo Estimado (R$)'},
-        text_auto='.2s'
-    )
-    fig_andar.update_layout(xaxis_type='category') # Garante que mostre todos os andares
-    st.plotly_chart(fig_andar, use_container_width=True)
+    with tab1:
+        # Gráficos Principais
+        col_chart1, col_chart2 = st.columns(2)
 
+        with col_chart1:
+            st.subheader("Distribuição de Custos por Tipo")
+            fig_pie = px.pie(df_dashboard, values='Custo_Mensal_R$', names='Categoria_Macro', 
+                             hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
+            st.plotly_chart(fig_pie, use_container_width=True)
 
-    # Detalhamento de Dados (Tabela)
-    with st.expander("Ver Dados Detalhados por Equipamento"):
-        st.dataframe(df_raw[['des_nome_equipamento', 'des_categoria', 'num_andar', 'Quant', 'num_potencia', 'des_potencia', 'Custo_Mensal_R$']].sort_values(by='Custo_Mensal_R$', ascending=False))
+        with col_chart2:
+            st.subheader("Comparativo de Economia por Setor")
+            fig_bar = go.Figure()
+            fig_bar.add_trace(go.Bar(x=df_dashboard['Categoria_Macro'], y=df_dashboard['Custo_Mensal_R$'], name='Custo Atual', marker_color='#EF553B'))
+            fig_bar.add_trace(go.Bar(x=df_dashboard['Categoria_Macro'], y=df_dashboard['Custo_Projetado_R$'], name='Custo Otimizado', marker_color='#00CC96'))
+            fig_bar.update_layout(barmode='group', xaxis_title="Categoria", yaxis_title="Custo (R$)")
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+    with tab2:
+        st.subheader("📅 Projeção de Consumo Anual (Sazonalidade)")
+        st.markdown("""
+        Esta simulação considera que o uso do **Ar Condicionado** varia ao longo do ano.
+        * **Verão (Dez-Mar):** Uso intenso (Fator 1.2x).
+        * **Inverno (Jun-Ago):** Uso médio/alto para aquecimento (Fator 1.0x).
+        * **Meia-estação:** Uso reduzido (Fator 0.6x - 0.8x).
+        """)
+        
+        # Fatores de Sazonalidade Estimados para Porto Alegre (UFRGS)
+        sazonalidade_poa = {
+            'Jan': 1.2, 'Fev': 1.2, 'Mar': 1.1, 'Abr': 0.8,
+            'Mai': 0.6, 'Jun': 0.9, 'Jul': 1.0, 'Ago': 0.9,
+            'Set': 0.7, 'Out': 0.9, 'Nov': 1.1, 'Dez': 1.2
+        }
+        
+        # Separar custos base (Ar vs Outros)
+        custo_base_ar = df_raw[df_raw['Categoria_Macro'] == 'Climatização']['Custo_Mensal_R$'].sum()
+        custo_base_outros = df_raw[df_raw['Categoria_Macro'] != 'Climatização']['Custo_Mensal_R$'].sum()
+        
+        custo_proj_ar = df_raw[df_raw['Categoria_Macro'] == 'Climatização']['Custo_Projetado_R$'].sum()
+        custo_proj_outros = df_raw[df_raw['Categoria_Macro'] != 'Climatização']['Custo_Projetado_R$'].sum()
+        
+        dados_sazonais = []
+        for mes, fator in sazonalidade_poa.items():
+            # Custo Atual
+            total_atual = (custo_base_ar * fator) + custo_base_outros
+            dados_sazonais.append({'Mês': mes, 'Cenário': 'Custo Atual', 'Valor (R$)': total_atual})
+            
+            # Custo Projetado (Com economia)
+            total_proj = (custo_proj_ar * fator) + custo_proj_outros
+            dados_sazonais.append({'Mês': mes, 'Cenário': 'Custo Otimizado', 'Valor (R$)': total_proj})
+            
+        df_sazonal = pd.DataFrame(dados_sazonais)
+        
+        fig_line = px.line(df_sazonal, x='Mês', y='Valor (R$)', color='Cenário', markers=True,
+                           color_discrete_map={'Custo Atual': '#EF553B', 'Custo Otimizado': '#00CC96'})
+        fig_line.update_layout(yaxis_title="Custo Estimado (R$)", hovermode="x unified")
+        st.plotly_chart(fig_line, use_container_width=True)
+        
+        custo_anual_atual = df_sazonal[df_sazonal['Cenário']=='Custo Atual']['Valor (R$)'].sum()
+        custo_anual_proj = df_sazonal[df_sazonal['Cenário']=='Custo Otimizado']['Valor (R$)'].sum()
+        st.info(f"💰 **Economia Anual Projetada:** R$ {(custo_anual_atual - custo_anual_proj):,.2f}")
+
+    with tab3:
+        # VISUALIZAÇÃO POR ANDAR
+        st.subheader("🏢 Análise de Custo por Andar")
+        
+        # Agrupa por andar e ordena
+        df_andar = df_raw.groupby('num_andar')[['Custo_Mensal_R$']].sum().reset_index()
+        
+        # Tenta ordenar numericamente se possível, senão alfabeticamente
+        try:
+            df_andar['sort_key'] = pd.to_numeric(df_andar['num_andar'])
+            df_andar = df_andar.sort_values('sort_key')
+        except:
+            df_andar = df_andar.sort_values('num_andar')
+
+        fig_andar = px.bar(
+            df_andar, 
+            x='num_andar', 
+            y='Custo_Mensal_R$', 
+            color='Custo_Mensal_R$',
+            color_continuous_scale='Reds',
+            labels={'num_andar': 'Andar', 'Custo_Mensal_R$': 'Custo Estimado (R$)'},
+            text_auto='.2s'
+        )
+        fig_andar.update_layout(xaxis_type='category') 
+        st.plotly_chart(fig_andar, use_container_width=True)
+
+        # Detalhamento de Dados (Tabela)
+        with st.expander("Ver Tabela Detalhada"):
+            st.dataframe(df_raw[['des_nome_equipamento', 'des_categoria', 'num_andar', 'Quant', 'num_potencia', 'Custo_Mensal_R$']].sort_values(by='Custo_Mensal_R$', ascending=False))
 
     # --- 6. SIMULAÇÃO DE PICO ---
     st.divider()
