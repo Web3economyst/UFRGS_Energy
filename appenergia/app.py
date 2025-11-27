@@ -43,6 +43,12 @@ def load_and_process_data():
             df['num_andar'] = df['num_andar'].astype(str).str.replace(r'\.0$', '', regex=True).replace(['nan', 'NaN', ''], 'Não Identificado')
         else:
             df['num_andar'] = 'Não Identificado'
+
+        # Tratamento da coluna de Sala (Limpeza)
+        if 'Id_sala' in df.columns:
+            df['Id_sala'] = df['Id_sala'].astype(str).replace(['nan', 'NaN', ''], 'Não Identificado')
+        else:
+            df['Id_sala'] = 'Não Identificado'
         
         # --- LÓGICA DE CONVERSÃO DE POTÊNCIA ---
         def converter_para_watts(row):
@@ -73,7 +79,7 @@ if not df_raw.empty:
     # --- 2. PREMISSAS DE CÁLCULO (INTERATIVAS) ---
     with st.sidebar:
         st.header("⚙️ Premissas de Cálculo")
-        st.caption("Versão: 1.5 (Viabilidade Financeira)")
+        st.caption("Versão: 1.6 (Detalhe por Sala)")
         st.markdown("Ajuste as horas de uso para refinar a estimativa mensal.")
         
         horas_ar = st.slider("Horas/Dia - Ar Condicionado", 0, 24, 8)
@@ -150,7 +156,7 @@ if not df_raw.empty:
     st.divider()
     
     # --- ABAS PARA ORGANIZAR O CONTEÚDO ---
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Visão Geral", "📅 Sazonalidade (Anual)", "🏢 Detalhes por Andar", "💰 Viabilidade Financeira"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Visão Geral", "📅 Sazonalidade (Anual)", "🏢 Detalhes (Andar/Sala)", "💰 Viabilidade Financeira"])
 
     with tab1:
         # Gráficos Principais
@@ -240,9 +246,32 @@ if not df_raw.empty:
         fig_andar.update_layout(xaxis_type='category') 
         st.plotly_chart(fig_andar, use_container_width=True)
 
+        # VISUALIZAÇÃO POR SALA (NOVO)
+        st.divider()
+        st.subheader("🚪 Top 20 Salas com Maior Consumo")
+        
+        # Agrupa por Sala e Andar (para contexto)
+        df_sala = df_raw.groupby(['Id_sala', 'num_andar'])[['Custo_Mensal_R$']].sum().reset_index()
+        # Pega as 20 mais caras
+        df_sala = df_sala.sort_values(by='Custo_Mensal_R$', ascending=False).head(20)
+        
+        fig_sala = px.bar(
+            df_sala, 
+            x='Id_sala', 
+            y='Custo_Mensal_R$', 
+            color='Custo_Mensal_R$',
+            color_continuous_scale='Reds',
+            hover_data=['num_andar'],
+            labels={'Id_sala': 'Sala', 'Custo_Mensal_R$': 'Custo Estimado (R$)', 'num_andar': 'Andar'},
+            text_auto='.2s'
+        )
+        fig_sala.update_layout(xaxis_title="Sala (Identificação)", yaxis_title="Custo Estimado (R$)")
+        st.plotly_chart(fig_sala, use_container_width=True)
+        st.caption("Exibindo as 20 salas com maior custo estimado mensal.")
+
         # Detalhamento de Dados (Tabela)
-        with st.expander("Ver Tabela Detalhada"):
-            st.dataframe(df_raw[['des_nome_equipamento', 'des_categoria', 'num_andar', 'Quant', 'num_potencia', 'Custo_Mensal_R$']].sort_values(by='Custo_Mensal_R$', ascending=False))
+        with st.expander("Ver Tabela Detalhada Completa"):
+            st.dataframe(df_raw[['des_nome_equipamento', 'des_categoria', 'num_andar', 'Id_sala', 'Quant', 'num_potencia', 'Custo_Mensal_R$']].sort_values(by='Custo_Mensal_R$', ascending=False))
 
     with tab4:
         st.subheader("💰 Viabilidade Econômica (ROI)")
