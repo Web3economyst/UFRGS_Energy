@@ -21,8 +21,9 @@ DATA_URL = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/main/Pl
 @st.cache_data
 def load_and_process_data():
     try:
-        # Tenta ler o CSV. Ajuste de encoding e separador pode ser necessário dependendo de como foi salvo
-        df = pd.read_csv(DATA_URL, on_bad_lines='skip') 
+        # Tenta ler o CSV especificando encoding 'cp1252' (Padrão Excel/Windows Brasil)
+        # O erro 'utf-8' acontece quando o pandas tenta ler arquivos com acentos (é, ç) sem esse parâmetro
+        df = pd.read_csv(DATA_URL, encoding='cp1252', on_bad_lines='skip') 
         
         # Limpeza básica de nomes de colunas (remover espaços extras)
         df.columns = df.columns.str.strip()
@@ -40,7 +41,8 @@ def load_and_process_data():
         
         def converter_para_watts(row):
             potencia = row['num_potencia']
-            unidade = str(row['des_potencia']).upper().strip()
+            # Garante que é string antes de chamar .upper()
+            unidade = str(row['des_potencia']).upper().strip() if pd.notna(row['des_potencia']) else ""
             
             if 'BTU' in unidade:
                 # Conversão estimada de capacidade térmica para potência elétrica (W)
@@ -65,6 +67,7 @@ if not df_raw.empty:
     # --- 2. PREMISSAS DE CÁLCULO (INTERATIVAS) ---
     with st.sidebar:
         st.header("⚙️ Premissas de Cálculo")
+        st.caption("Versão: 1.1 (Encoding Fix)") # Indicador visual da versão
         st.markdown("Ajuste as horas de uso para refinar a estimativa mensal.")
         
         horas_ar = st.slider("Horas/Dia - Ar Condicionado", 0, 24, 8)
