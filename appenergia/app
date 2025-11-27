@@ -67,7 +67,7 @@
   },
   {
    "cell_type": "code",
-   "execution_count": 12,
+   "execution_count": 13,
    "id": "7a515cd3-dcb5-4104-b0fc-728b7588685c",
    "metadata": {},
    "outputs": [
@@ -75,13 +75,7 @@
      "name": "stderr",
      "output_type": "stream",
      "text": [
-      "2025-11-27 19:40:25.311 \n",
-      "  \u001b[33m\u001b[1mWarning:\u001b[0m to view this Streamlit app on a browser, run it with the following\n",
-      "  command:\n",
-      "\n",
-      "    streamlit run C:\\Users\\Games\\anaconda3\\Lib\\site-packages\\ipykernel_launcher.py [ARGUMENTS]\n",
-      "2025-11-27 19:40:25.313 No runtime found, using MemoryCacheStorageManager\n",
-      "2025-11-27 19:40:25.317 No runtime found, using MemoryCacheStorageManager\n"
+      "2025-11-27 19:43:49.960 No runtime found, using MemoryCacheStorageManager\n"
      ]
     }
    ],
