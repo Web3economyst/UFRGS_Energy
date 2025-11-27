@@ -26,7 +26,6 @@ DATA_URL = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/main/Pl
 def load_and_process_data():
     try:
         # Tenta ler o CSV especificando encoding 'cp1252' (Padrão Excel/Windows Brasil)
-        # O erro 'utf-8' acontece quando o pandas tenta ler arquivos com acentos (é, ç) sem esse parâmetro
         df = pd.read_csv(DATA_URL, encoding='cp1252', on_bad_lines='skip') 
         
         # Limpeza básica de nomes de colunas (remover espaços extras)
@@ -46,10 +45,6 @@ def load_and_process_data():
             df['num_andar'] = 'Não Identificado'
         
         # --- LÓGICA DE CONVERSÃO DE POTÊNCIA ---
-        # A planilha tem 'W' e 'BTU'. Precisamos unificar tudo em Watts.
-        # Estimativa: 1 BTU/h ~= 0.293 Watts térmicos. 
-        # Consumo elétrico (aproximado para modelos antigos): BTU * 0.09 ou BTU / 10 (regra prática conservadora)
-        
         def converter_para_watts(row):
             potencia = row['num_potencia']
             # Garante que é string antes de chamar .upper()
@@ -78,7 +73,7 @@ if not df_raw.empty:
     # --- 2. PREMISSAS DE CÁLCULO (INTERATIVAS) ---
     with st.sidebar:
         st.header("⚙️ Premissas de Cálculo")
-        st.caption("Versão: 1.4 (Descritivo Detalhado)") # Indicador visual da versão
+        st.caption("Versão: 1.5 (Viabilidade Financeira)")
         st.markdown("Ajuste as horas de uso para refinar a estimativa mensal.")
         
         horas_ar = st.slider("Horas/Dia - Ar Condicionado", 0, 24, 8)
@@ -92,7 +87,6 @@ if not df_raw.empty:
         fator_co2 = st.number_input("kg CO2 por kWh (Méd. BR)", value=0.086, format="%.3f")
 
     # --- 3. CATEGORIZAÇÃO E CÁLCULOS ---
-    # Função para mapear categorias do CSV para grupos maiores
     def agrupar_categoria(cat_original):
         cat = str(cat_original).upper()
         if 'CLIMATIZAÇÃO' in cat or 'AR CONDICIONADO' in cat: return 'Climatização'
@@ -120,7 +114,6 @@ if not df_raw.empty:
     df_raw['Custo_Mensal_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_kwh
 
     # --- 4. CÁLCULO DE ECONOMIA (CENÁRIOS) ---
-    # Definindo % de economia por categoria (baseado na análise anterior)
     fator_economia = {
         'Climatização': 0.40,  # 40% (Inverter + Isolamento)
         'Iluminação': 0.60,    # 60% (LED + Sensores)
@@ -157,7 +150,7 @@ if not df_raw.empty:
     st.divider()
     
     # --- ABAS PARA ORGANIZAR O CONTEÚDO ---
-    tab1, tab2, tab3 = st.tabs(["📊 Visão Geral", "📅 Sazonalidade (Anual)", "🏢 Detalhes por Andar"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Visão Geral", "📅 Sazonalidade (Anual)", "🏢 Detalhes por Andar", "💰 Viabilidade Financeira"])
 
     with tab1:
         # Gráficos Principais
@@ -250,6 +243,103 @@ if not df_raw.empty:
         # Detalhamento de Dados (Tabela)
         with st.expander("Ver Tabela Detalhada"):
             st.dataframe(df_raw[['des_nome_equipamento', 'des_categoria', 'num_andar', 'Quant', 'num_potencia', 'Custo_Mensal_R$']].sort_values(by='Custo_Mensal_R$', ascending=False))
+
+    with tab4:
+        st.subheader("💰 Viabilidade Econômica (ROI)")
+        st.markdown("Estime o investimento (CAPEX) necessário para as substituições e calcule o tempo de retorno (Payback).")
+
+        # 1. Inputs de Custo (Capex)
+        with st.expander("🛠️ Configurar Custos de Investimento (Estimados)", expanded=True):
+            col_inv1, col_inv2, col_inv3 = st.columns(3)
+            
+            # Iluminação
+            custo_lampada = col_inv1.number_input("Custo Unit. Lâmpada LED (R$)", value=25.0, step=5.0)
+            custo_sensor = col_inv1.number_input("Custo Unit. Sensor Presença (R$)", value=60.0, step=10.0)
+            
+            # Climatização
+            custo_ac_novo = col_inv2.number_input("Custo Unit. Ar Inverter (R$)", value=3500.0, step=100.0)
+            perc_troca_ac = col_inv2.slider("% do Parque de Ar a substituir", 0, 100, 40, help="Considerando apenas os aparelhos mais antigos")
+            
+            # Informática
+            custo_pc_novo = col_inv3.number_input("Custo Unit. Mini PC (R$)", value=2800.0, step=100.0)
+            perc_troca_pc = col_inv3.slider("% do Parque de PCs a substituir", 0, 100, 30, help="Foco em torres antigas")
+
+        # 2. Quantidades (Baseado no Inventário)
+        # Iluminação: Troca total assumida (baixo custo unitário, alto retorno)
+        qtd_lampadas = int(df_raw[df_raw['Categoria_Macro'] == 'Iluminação']['Quant'].sum())
+        qtd_sensores = int(qtd_lampadas / 10) # Estimativa: 1 sensor para cada 10 lâmpadas em áreas comuns
+        
+        # Climatização
+        qtd_ac_total = int(df_raw[df_raw['Categoria_Macro'] == 'Climatização']['Quant'].sum())
+        qtd_ac_troca = int(qtd_ac_total * (perc_troca_ac/100))
+        
+        # Informática
+        qtd_pc_total = int(df_raw[df_raw['Categoria_Macro'] == 'Informática']['Quant'].sum())
+        qtd_pc_troca = int(qtd_pc_total * (perc_troca_pc/100))
+
+        # 3. Cálculo do Investimento Total (CAPEX)
+        inv_iluminacao = (qtd_lampadas * custo_lampada) + (qtd_sensores * custo_sensor)
+        inv_climatizacao = qtd_ac_troca * custo_ac_novo
+        inv_informatica = qtd_pc_troca * custo_pc_novo
+        inv_total = inv_iluminacao + inv_climatizacao + inv_informatica
+
+        # 4. Cálculo da Economia Mensal Real (OPEX Reduzido)
+        # Recalcula economia baseada estritamente nos sliders desta aba
+        custo_atual_clima = df_dashboard[df_dashboard['Categoria_Macro'] == 'Climatização']['Custo_Mensal_R$'].sum()
+        eco_mensal_clima = (custo_atual_clima * (perc_troca_ac/100)) * 0.50 # Assumindo 50% de ganho de eficiência na troca
+        
+        custo_atual_info = df_dashboard[df_dashboard['Categoria_Macro'] == 'Informática']['Custo_Mensal_R$'].sum()
+        eco_mensal_info = (custo_atual_info * (perc_troca_pc/100)) * 0.40 # Assumindo 40% de ganho
+        
+        # Iluminação mantém a base total pois assumimos troca global
+        eco_mensal_ilum = df_dashboard[df_dashboard['Categoria_Macro'] == 'Iluminação']['Economia_Estimada_R$'].sum()
+        
+        eco_mensal_total = eco_mensal_ilum + eco_mensal_clima + eco_mensal_info
+        
+        # 5. Payback
+        payback_meses = inv_total / eco_mensal_total if eco_mensal_total > 0 else 0
+        payback_anos = payback_meses / 12
+
+        # 6. Display de Resultados
+        st.markdown("### 📊 Resultado da Simulação")
+        col_res1, col_res2, col_res3 = st.columns(3)
+        col_res1.metric("Investimento Total (CAPEX)", f"R$ {inv_total:,.2f}", delta="Custo Único", delta_color="inverse")
+        col_res2.metric("Economia Mensal Gerada", f"R$ {eco_mensal_total:,.2f}", delta="Recorrente")
+        col_res3.metric("Tempo de Retorno (Payback)", f"{payback_meses:.1f} meses", delta=f"{payback_anos:.1f} anos", delta_color="normal")
+
+        # Detalhe do Investimento por Categoria
+        chart_data = pd.DataFrame({
+            'Categoria': ['Iluminação', 'Climatização', 'Informática'],
+            'Investimento': [inv_iluminacao, inv_climatizacao, inv_informatica]
+        })
+        
+        # Gráfico de Fluxo de Caixa (Break-even Point)
+        st.subheader("📉 Curva de Payback (Ponto de Equilíbrio)")
+        
+        meses_projecao = int(payback_meses * 2.5) if payback_meses > 0 else 24
+        if meses_projecao > 60: meses_projecao = 60 # Limitar gráfico a 5 anos
+        
+        fluxo = []
+        saldo = -inv_total
+        for m in range(meses_projecao + 1):
+            fluxo.append({'Mês': m, 'Saldo Acumulado (R$)': saldo})
+            saldo += eco_mensal_total
+        
+        df_fluxo = pd.DataFrame(fluxo)
+        
+        fig_fluxo = px.area(df_fluxo, x='Mês', y='Saldo Acumulado (R$)', markers=False,
+                            color_discrete_sequence=['#00CC96'])
+        
+        # Adiciona linha zero (ponto de retorno)
+        fig_fluxo.add_hline(y=0, line_dash="dash", line_color="white", annotation_text="Investimento Pago")
+        fig_fluxo.update_layout(xaxis_title="Meses após implementação", yaxis_title="Fluxo de Caixa Acumulado (R$)")
+        
+        st.plotly_chart(fig_fluxo, use_container_width=True)
+        
+        st.info(f"""
+        **Resumo do Plano:** Substituindo **{qtd_lampadas}** lâmpadas, **{qtd_ac_troca}** aparelhos de ar-condicionado e **{qtd_pc_troca}** computadores, 
+        o projeto se paga em aproximadamente **{payback_meses:.0f} meses**.
+        """)
 
     # --- 6. SIMULAÇÃO DE PICO ---
     st.divider()
