@@ -33,6 +33,13 @@ def load_and_process_data():
         
         # Garantir que Potência é número (tratando possíveis textos)
         df['num_potencia'] = pd.to_numeric(df['num_potencia'], errors='coerce').fillna(0)
+
+        # Tratamento da coluna de Andar (Limpeza)
+        if 'num_andar' in df.columns:
+            # Converte para string, remove decimais (.0) e preenche vazios
+            df['num_andar'] = df['num_andar'].astype(str).str.replace(r'\.0$', '', regex=True).replace(['nan', 'NaN', ''], 'Não Identificado')
+        else:
+            df['num_andar'] = 'Não Identificado'
         
         # --- LÓGICA DE CONVERSÃO DE POTÊNCIA ---
         # A planilha tem 'W' e 'BTU'. Precisamos unificar tudo em Watts.
@@ -67,7 +74,7 @@ if not df_raw.empty:
     # --- 2. PREMISSAS DE CÁLCULO (INTERATIVAS) ---
     with st.sidebar:
         st.header("⚙️ Premissas de Cálculo")
-        st.caption("Versão: 1.1 (Encoding Fix)") # Indicador visual da versão
+        st.caption("Versão: 1.2 (Com Análise por Andar)") # Indicador visual da versão
         st.markdown("Ajuste as horas de uso para refinar a estimativa mensal.")
         
         horas_ar = st.slider("Horas/Dia - Ar Condicionado", 0, 24, 8)
@@ -134,11 +141,11 @@ if not df_raw.empty:
 
     st.divider()
 
-    # Gráficos
+    # Gráficos Principais
     col_chart1, col_chart2 = st.columns(2)
 
     with col_chart1:
-        st.subheader("📊 Distribuição de Custos")
+        st.subheader("📊 Distribuição de Custos por Tipo")
         fig_pie = px.pie(df_dashboard, values='Custo_Mensal_R$', names='Categoria_Macro', 
                          hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
         st.plotly_chart(fig_pie, use_container_width=True)
@@ -150,12 +157,39 @@ if not df_raw.empty:
         fig_bar.add_trace(go.Bar(x=df_dashboard['Categoria_Macro'], y=df_dashboard['Custo_Projetado_R$'], name='Custo Otimizado', marker_color='#00CC96'))
         fig_bar.update_layout(barmode='group', xaxis_title="Categoria", yaxis_title="Custo (R$)")
         st.plotly_chart(fig_bar, use_container_width=True)
+    
+    # --- NOVO: VISUALIZAÇÃO POR ANDAR ---
+    st.divider()
+    st.subheader("🏢 Análise de Custo por Andar")
+    
+    # Agrupa por andar e ordena
+    df_andar = df_raw.groupby('num_andar')[['Custo_Mensal_R$']].sum().reset_index()
+    
+    # Tenta ordenar numericamente se possível, senão alfabeticamente
+    try:
+        df_andar['sort_key'] = pd.to_numeric(df_andar['num_andar'])
+        df_andar = df_andar.sort_values('sort_key')
+    except:
+        df_andar = df_andar.sort_values('num_andar')
+
+    fig_andar = px.bar(
+        df_andar, 
+        x='num_andar', 
+        y='Custo_Mensal_R$', 
+        color='Custo_Mensal_R$',
+        color_continuous_scale='Reds',
+        labels={'num_andar': 'Andar', 'Custo_Mensal_R$': 'Custo Estimado (R$)'},
+        text_auto='.2s'
+    )
+    fig_andar.update_layout(xaxis_type='category') # Garante que mostre todos os andares
+    st.plotly_chart(fig_andar, use_container_width=True)
+
 
     # Detalhamento de Dados (Tabela)
     with st.expander("Ver Dados Detalhados por Equipamento"):
-        st.dataframe(df_raw[['des_nome_equipamento', 'des_categoria', 'Quant', 'num_potencia', 'des_potencia', 'Custo_Mensal_R$']].sort_values(by='Custo_Mensal_R$', ascending=False))
+        st.dataframe(df_raw[['des_nome_equipamento', 'des_categoria', 'num_andar', 'Quant', 'num_potencia', 'des_potencia', 'Custo_Mensal_R$']].sort_values(by='Custo_Mensal_R$', ascending=False))
 
-    # --- 6. SIMULAÇÃO DE PICO (NOVA) ---
+    # --- 6. SIMULAÇÃO DE PICO ---
     st.divider()
     st.subheader("⚠️ Análise de Carga Instalada (Pico)")
     
