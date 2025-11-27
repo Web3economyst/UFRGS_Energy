@@ -167,3 +167,5 @@ if not df_raw.empty:
 
 else:
     st.warning("Aguardando carregamento dos dados. Verifique se o link do GitHub está correto e público.")
+
+!python -m streamlit run app.py

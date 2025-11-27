@@ -67,20 +67,25 @@
   },
   {
    "cell_type": "code",
-   "execution_count": 5,
+   "execution_count": 12,
    "id": "7a515cd3-dcb5-4104-b0fc-728b7588685c",
    "metadata": {},
    "outputs": [
     {
-     "name": "stdout",
+     "name": "stderr",
      "output_type": "stream",
      "text": [
-      "Writing app.py\n"
+      "2025-11-27 19:40:25.311 \n",
+      "  \u001b[33m\u001b[1mWarning:\u001b[0m to view this Streamlit app on a browser, run it with the following\n",
+      "  command:\n",
+      "\n",
+      "    streamlit run C:\\Users\\Games\\anaconda3\\Lib\\site-packages\\ipykernel_launcher.py [ARGUMENTS]\n",
+      "2025-11-27 19:40:25.313 No runtime found, using MemoryCacheStorageManager\n",
+      "2025-11-27 19:40:25.317 No runtime found, using MemoryCacheStorageManager\n"
      ]
     }
    ],
    "source": [
-    "%%writefile app.py\n",
     "import streamlit as st\n",
     "import pandas as pd\n",
     "import plotly.express as px\n",
@@ -104,8 +109,9 @@
     "@st.cache_data\n",
     "def load_and_process_data():\n",
     "    try:\n",
-    "        # Tenta ler o CSV. Ajuste de encoding e separador pode ser necessário dependendo de como foi salvo\n",
-    "        df = pd.read_csv(DATA_URL, on_bad_lines='skip') \n",
+    "        # Tenta ler o CSV especificando encoding 'latin-1' para suportar acentos (é, ç, ã)\n",
+    "        # Se 'latin-1' falhar, o pandas tentará ignorar erros de linha\n",
+    "        df = pd.read_csv(DATA_URL, encoding='latin-1', on_bad_lines='skip') \n",
     "        \n",
     "        # Limpeza básica de nomes de colunas (remover espaços extras)\n",
     "        df.columns = df.columns.str.strip()\n",
@@ -123,7 +129,8 @@
     "        \n",
     "        def converter_para_watts(row):\n",
     "            potencia = row['num_potencia']\n",
-    "            unidade = str(row['des_potencia']).upper().strip()\n",
+    "            # Garante que é string antes de chamar .upper()\n",
+    "            unidade = str(row['des_potencia']).upper().strip() if pd.notna(row['des_potencia']) else \"\"\n",
     "            \n",
     "            if 'BTU' in unidade:\n",
     "                # Conversão estimada de capacidade térmica para potência elétrica (W)\n",
@@ -258,14 +265,20 @@
    "id": "b8b7c5b7-0cbb-4f6a-94c4-d62f255e350b",
    "metadata": {},
    "outputs": [],
-   "source": [
-    "!python -m streamlit run app.py"
-   ]
+   "source": []
   },
   {
    "cell_type": "code",
    "execution_count": null,
    "id": "0e4311d7-b705-473f-8eea-fc098f0f2f79",
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "06f46c27-5d60-4532-b515-860bf416a2fc",
    "metadata": {},
    "outputs": [],
    "source": []
