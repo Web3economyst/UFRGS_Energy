@@ -10,7 +10,11 @@ st.set_page_config(page_title="Dashboard de Energia UFRGS", layout="wide", page_
 st.title("⚡ Monitoramento de Eficiência Energética")
 st.markdown("""
 Este painel consome dados em tempo real do inventário hospedado no GitHub. 
-Ele processa o consumo estimado e projeta economias com base na modernização dos equipamentos.
+Ele processa o consumo estimado e projeta economias com base na modernização dos equipamentos, focando em três pilares principais:
+
+* **⚡ Iluminação (LED + Sensores):** Substituição de lâmpadas fluorescentes por tecnologia LED e instalação de sensores de presença em áreas de circulação.
+* **❄️ Climatização (Inverter + Isolamento):** Troca de aparelhos de ar-condicionado antigos (Janela/On-Off) por modelos Inverter mais eficientes e melhorias no isolamento térmico.
+* **💻 Modernização de Equipamentos:** Renovação do parque tecnológico (substituição de CPUs antigas por Mini PCs) e troca de eletrodomésticos ineficientes.
 """)
 
 # --- 1. CARREGAMENTO E TRATAMENTO DE DADOS ---
@@ -74,7 +78,7 @@ if not df_raw.empty:
     # --- 2. PREMISSAS DE CÁLCULO (INTERATIVAS) ---
     with st.sidebar:
         st.header("⚙️ Premissas de Cálculo")
-        st.caption("Versão: 1.3 (Sazonalidade + CO2)") # Indicador visual da versão
+        st.caption("Versão: 1.4 (Descritivo Detalhado)") # Indicador visual da versão
         st.markdown("Ajuste as horas de uso para refinar a estimativa mensal.")
         
         horas_ar = st.slider("Horas/Dia - Ar Condicionado", 0, 24, 8)
