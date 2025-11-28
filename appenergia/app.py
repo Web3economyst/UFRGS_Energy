@@ -79,7 +79,7 @@ if not df_raw.empty:
     # --- 2. PREMISSAS DE CÁLCULO (INTERATIVAS) ---
     with st.sidebar:
         st.header("⚙️ Premissas de Cálculo")
-        st.caption("Versão: 1.6 (Detalhe por Sala)")
+        st.caption("Versão: 1.7 (Seletor de Sala)")
         st.markdown("Ajuste as horas de uso para refinar a estimativa mensal.")
         
         horas_ar = st.slider("Horas/Dia - Ar Condicionado", 0, 24, 8)
@@ -246,32 +246,40 @@ if not df_raw.empty:
         fig_andar.update_layout(xaxis_type='category') 
         st.plotly_chart(fig_andar, use_container_width=True)
 
-        # VISUALIZAÇÃO POR SALA (NOVO)
+        # VISUALIZAÇÃO POR SALA (SELETOR)
         st.divider()
-        st.subheader("🚪 Top 20 Salas com Maior Consumo")
+        st.subheader("🚪 Detalhamento por Sala")
         
-        # Agrupa por Sala e Andar (para contexto)
-        df_sala = df_raw.groupby(['Id_sala', 'num_andar'])[['Custo_Mensal_R$']].sum().reset_index()
-        # Pega as 20 mais caras
-        df_sala = df_sala.sort_values(by='Custo_Mensal_R$', ascending=False).head(20)
+        # Pega a lista de salas únicas e ordenadas
+        lista_salas = sorted(df_raw['Id_sala'].unique().astype(str))
         
-        fig_sala = px.bar(
-            df_sala, 
-            x='Id_sala', 
-            y='Custo_Mensal_R$', 
-            color='Custo_Mensal_R$',
-            color_continuous_scale='Reds',
-            hover_data=['num_andar'],
-            labels={'Id_sala': 'Sala', 'Custo_Mensal_R$': 'Custo Estimado (R$)', 'num_andar': 'Andar'},
-            text_auto='.2s'
-        )
-        fig_sala.update_layout(xaxis_title="Sala (Identificação)", yaxis_title="Custo Estimado (R$)")
-        st.plotly_chart(fig_sala, use_container_width=True)
-        st.caption("Exibindo as 20 salas com maior custo estimado mensal.")
-
-        # Detalhamento de Dados (Tabela)
-        with st.expander("Ver Tabela Detalhada Completa"):
-            st.dataframe(df_raw[['des_nome_equipamento', 'des_categoria', 'num_andar', 'Id_sala', 'Quant', 'num_potencia', 'Custo_Mensal_R$']].sort_values(by='Custo_Mensal_R$', ascending=False))
+        # Seletor interativo
+        sala_selecionada = st.selectbox("Selecione a Sala para ver detalhes:", lista_salas)
+        
+        if sala_selecionada:
+            # Filtra o DataFrame original
+            df_sala_detalhe = df_raw[df_raw['Id_sala'] == sala_selecionada]
+            
+            # Métricas da Sala
+            custo_sala = df_sala_detalhe['Custo_Mensal_R$'].sum()
+            potencia_sala = df_sala_detalhe['Potencia_Total_Item_W'].sum()
+            qtd_equip = df_sala_detalhe['Quant'].sum()
+            andar_sala = df_sala_detalhe['num_andar'].iloc[0] if not df_sala_detalhe.empty else "N/A"
+            
+            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+            col_s1.metric("Custo Mensal da Sala", f"R$ {custo_sala:,.2f}")
+            col_s2.metric("Potência Instalada", f"{potencia_sala:,.0f} W")
+            col_s3.metric("Qtd. Equipamentos", f"{qtd_equip}")
+            col_s4.metric("Localização", f"Andar {andar_sala}")
+            
+            # Tabela de Equipamentos da Sala
+            st.markdown(f"**Equipamentos na Sala: {sala_selecionada}**")
+            st.dataframe(
+                df_sala_detalhe[['des_nome_equipamento', 'des_categoria', 'Quant', 'num_potencia', 'Custo_Mensal_R$']]
+                .sort_values(by='Custo_Mensal_R$', ascending=False)
+                .reset_index(drop=True),
+                use_container_width=True
+            )
 
     with tab4:
         st.subheader("💰 Viabilidade Econômica (ROI)")
