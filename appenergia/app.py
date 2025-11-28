@@ -65,37 +65,33 @@ def load_data():
             
             df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados if nome_aba_dados else 0)
             
-            # Limpeza de colunas duplicadas (Ajuste Solicitado 1)
+            # Limpeza de colunas duplicadas
             df_oc = df_oc.loc[:, ~df_oc.columns.duplicated()]
             df_oc.columns = df_oc.columns.str.strip()
             
-            # Mapeamento de colunas flexível
-            mapa_colunas = {
-                'Horário': 'DataHora', 'Data': 'DataHora',
-                'Tipo': 'EntradaSaida', 'Movimento': 'EntradaSaida'
-            }
-            df_oc = df_oc.rename(columns=mapa_colunas)
+            # Identificação inteligente de colunas (Evita erro de duplicação ao renomear)
+            col_data = next((c for c in df_oc.columns if c.upper() in ['DATAHORA', 'HORÁRIO', 'DATA', 'HORARIO']), None)
+            col_mov = next((c for c in df_oc.columns if c.upper() in ['ENTRADASAIDA', 'TIPO', 'MOVIMENTO']), None)
 
-            if 'DataHora' in df_oc.columns:
+            if col_data and col_mov:
+                df_oc = df_oc.rename(columns={col_data: 'DataHora', col_mov: 'EntradaSaida'})
+                
                 df_oc['DataHora'] = pd.to_datetime(df_oc['DataHora'], errors='coerce')
                 df_oc = df_oc.dropna(subset=['DataHora']).sort_values('DataHora')
                 
-                if 'EntradaSaida' in df_oc.columns:
-                    # Mapeia E->1, S->-1
-                    df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).str.upper().str[0].map({'E': 1, 'S': -1}).fillna(0)
-                else:
-                    df_oc['Variacao'] = 0
-
+                # Mapeia E->1, S->-1
+                df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).str.upper().str[0].map({'E': 1, 'S': -1}).fillna(0)
                 df_oc['Ocupacao_Acumulada'] = df_oc['Variacao'].cumsum()
                 
                 # Ajuste de base (não pode ser negativo)
                 min_val = df_oc['Ocupacao_Acumulada'].min()
                 if min_val < 0: df_oc['Ocupacao_Acumulada'] += abs(min_val)
             else:
-                df_oc = pd.DataFrame() # Falha segura
+                # Se não achar as colunas, cria um DF vazio mas não quebra o app
+                df_oc = pd.DataFrame()
             
         except Exception as e:
-            # st.warning(f"Aviso: Dados de ocupação não carregados ({e})") # Comentado para limpar visual se falhar
+            # st.error(f"Erro no Excel: {e}") # Debug apenas
             df_oc = pd.DataFrame()
 
         return df_inv, df_oc
@@ -110,9 +106,9 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS (COMPLETO) ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 3.1 (Ajustes Finais)")
+        st.caption("Versão: 3.2 (Correção Excel + PCs)")
         
-        # Sliders detalhados (Do código 1.8)
+        # Sliders detalhados
         with st.expander("Horas de Uso (Perfil Diário)", expanded=True):
             horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
             horas_luz = st.slider("Iluminação", 0, 24, 10)
@@ -304,10 +300,11 @@ if not df_raw.empty:
         
         if sel_sala:
             df_s = df_raw[df_raw['Id_sala'] == sel_sala]
-            custo_sala_total = df_s['Custo_Mensal_R$'].sum() # Ajuste 2
+            custo_sala_total = df_s['Custo_Mensal_R$'].sum() 
             
-            # KPI de destaque para a Sala
-            st.metric(f"Custo Total da Sala {sel_sala}", f"R$ {custo_sala_total:,.2f}")
+            # --- Destaque do Custo da Sala ---
+            st.markdown(f"#### 🏷️ Custo Estimado para {sel_sala}")
+            st.metric("Fatura Mensal da Sala", f"R$ {custo_sala_total:,.2f}")
             
             st.dataframe(df_s[['des_nome_equipamento', 'Quant', 'num_potencia', 'Custo_Mensal_R$']].sort_values('Custo_Mensal_R$', ascending=False))
 
@@ -315,51 +312,59 @@ if not df_raw.empty:
     with tab6:
         st.subheader("Simulador de Projeto (ROI)")
         
-        # Ajuste 3: Interatividade Aumentada
         col_proj1, col_proj2 = st.columns(2)
         
         with col_proj1:
             st.markdown("#### 🎯 Definir Meta de Projeto")
-            meta_invest = st.number_input("Quanto você quer investir? (R$)", value=50000.0, step=5000.0)
+            meta_invest = st.number_input("Quanto você quer investir? (R$)", value=100000.0, step=5000.0)
             
         with col_proj2:
             st.markdown("#### 💰 Custo Unitário de Equipamentos")
             inv_lampada = st.number_input("Lâmpada LED (R$)", 25.0)
             inv_ac = st.number_input("Ar Inverter (R$)", 3500.0)
-            inv_pc = st.number_input("Mini PC (R$)", 2800.0)
+            inv_pc = st.number_input("Mini Computadores (R$)", 2800.0)
 
         st.divider()
         
-        # Simulação Automática baseada no investimento
-        # Prioridade: 1. Luz (ROI rápido), 2. Ar (Grande impacto), 3. PC
+        # Simulação Automática: Luz -> Ar -> PC
         
+        # 1. Luz
         qtd_lamp_total = df_raw[df_raw['Categoria_Macro']=='Iluminação']['Quant'].sum()
         max_inv_luz = qtd_lamp_total * inv_lampada
-        
         investido_luz = min(meta_invest, max_inv_luz)
         sobra_1 = meta_invest - investido_luz
         luzes_trocadas = int(investido_luz / inv_lampada)
         
+        # 2. Ar Condicionado
         qtd_ac_total = df_raw[df_raw['Categoria_Macro']=='Climatização']['Quant'].sum()
         max_inv_ac = qtd_ac_total * inv_ac
-        
         investido_ac = min(sobra_1, max_inv_ac)
         sobra_2 = sobra_1 - investido_ac
         acs_trocados = int(investido_ac / inv_ac)
         
+        # 3. Mini Computadores (NOVO)
+        qtd_pc_total = df_raw[df_raw['Categoria_Macro']=='Informática']['Quant'].sum()
+        max_inv_pc = qtd_pc_total * inv_pc
+        investido_pc = min(sobra_2, max_inv_pc)
+        pcs_trocados = int(investido_pc / inv_pc)
+        
         # Resultados
         st.markdown(f"**Com R$ {meta_invest:,.2f}, você pode trocar:**")
-        k1, k2, k3 = st.columns(3)
-        k1.metric("Lâmpadas", f"{luzes_trocadas} un.", help="100% da verba vai pra luz primeiro (melhor ROI)")
-        k2.metric("Ares-Condicionados", f"{acs_trocados} un.", help="O que sobrar, vai para Ar Condicionado")
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Lâmpadas", f"{luzes_trocadas} un.", help="Prioridade 1: Melhor Retorno")
+        k2.metric("Ares-Condicionados", f"{acs_trocados} un.", help="Prioridade 2: Maior Consumo")
+        k3.metric("Mini Computadores", f"{pcs_trocados} un.", help="Prioridade 3: Modernização")
         
-        # Cálculo de Retorno dessa simulação específica
-        eco_luz = luzes_trocadas * (0.030 * 10 * 22 * tarifa_kwh * 0.6) # Estimativa simples de economia unitária
+        # Cálculo de Retorno
+        eco_luz = luzes_trocadas * (0.030 * 10 * 22 * tarifa_kwh * 0.6) 
         eco_ac = acs_trocados * (1.4 * 8 * 22 * tarifa_kwh * 0.4)
-        eco_total_proj = eco_luz + eco_ac
+        # Economia PC: (Consumo Antigo ~180W - Novo ~65W) -> 115W de economia * horas * dias * tarifa
+        eco_pc = pcs_trocados * (0.115 * 9 * 22 * tarifa_kwh)
+        
+        eco_total_proj = eco_luz + eco_ac + eco_pc
         
         payback_proj = meta_invest / eco_total_proj if eco_total_proj > 0 else 0
-        k3.metric("Payback Estimado", f"{payback_proj:.1f} meses")
+        k4.metric("Payback Estimado", f"{payback_proj:.1f} meses")
 
 else:
     st.warning("Aguardando carregamento dos dados...")
