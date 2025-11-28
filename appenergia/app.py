@@ -17,8 +17,8 @@ Ele integra análise de consumo, viabilidade financeira e monitoramento de deman
 
 # URL RAW do arquivo no GitHub (Link direto para o dado bruto)
 DATA_URL_INVENTARIO = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/main/Planilha%20Unificada(Equipamentos%20Consumo).csv"
-# Link para o arquivo Excel de Horários
-DATA_URL_OCUPACAO = "https://github.com/Web3economyst/UFRGS_Energy/raw/refs/heads/main/Hor%C3%A1rios.xlsx"
+# Link ajustado para o arquivo Horários.xlsx conforme sua indicação
+DATA_URL_OCUPACAO = "https://github.com/Web3economyst/UFRGS_Energy/raw/main/Hor%C3%A1rios.xlsx"
 
 @st.cache_data
 def load_data():
@@ -54,61 +54,60 @@ def load_data():
         try:
             xls = pd.ExcelFile(DATA_URL_OCUPACAO)
             
-            # Procura aba inteligente
+            # Procura aba que contenha as colunas especificadas (DataHora, EntradaSaida)
             nome_aba_dados = None
             for aba in xls.sheet_names:
                 df_temp = pd.read_excel(xls, sheet_name=aba, nrows=5)
-                cols_upper = [str(c).upper() for c in df_temp.columns]
-                if any(x in cols_upper for x in ['ENTRADASAIDA', 'DATAHORA', 'HORÁRIO', 'TIPO']):
+                cols_limpas = [str(c).strip() for c in df_temp.columns]
+                # Verifica se as colunas exatas estão presentes
+                if 'DataHora' in cols_limpas and 'EntradaSaida' in cols_limpas:
                     nome_aba_dados = aba
                     break
             
-            df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados if nome_aba_dados else 0)
-            
-            # Limpeza de colunas duplicadas
-            df_oc = df_oc.loc[:, ~df_oc.columns.duplicated()]
-            df_oc.columns = df_oc.columns.str.strip()
-            
-            # Identificação inteligente de colunas
-            col_data = next((c for c in df_oc.columns if str(c).upper() in ['DATAHORA', 'HORÁRIO', 'DATA', 'HORARIO', 'DATA_HORA']), None)
-            col_mov = next((c for c in df_oc.columns if str(c).upper() in ['ENTRADASAIDA', 'TIPO', 'MOVIMENTO', 'ENTRADA_SAIDA']), None)
+            # Se não achar pelos nomes exatos, tenta a primeira aba
+            if not nome_aba_dados:
+                nome_aba_dados = xls.sheet_names[0]
 
-            if col_data and col_mov:
-                df_oc = df_oc.rename(columns={col_data: 'DataHora', col_mov: 'EntradaSaida'})
+            df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados)
+            
+            # Limpeza de colunas duplicadas e espaços
+            df_oc = df_oc.loc[:, ~df_oc.columns.duplicated()]
+            df_oc.columns = df_oc.columns.astype(str).str.strip()
+            
+            # Verifica colunas essenciais
+            if 'DataHora' in df_oc.columns and 'EntradaSaida' in df_oc.columns:
                 
                 df_oc['DataHora'] = pd.to_datetime(df_oc['DataHora'], errors='coerce')
                 # Remove linhas sem data e ordena
                 df_oc = df_oc.dropna(subset=['DataHora']).sort_values('DataHora')
-                # CORREÇÃO PRINCIPAL: Reseta o índice para evitar erro "duplicate keys" no groupby
+                # Reseta índice para evitar erros de duplicidade
                 df_oc = df_oc.reset_index(drop=True)
                 
-                # Mapeia E->1, S->-1
-                df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).str.upper().str[0].map({'E': 1, 'S': -1}).fillna(0)
+                # Mapeia Movimento (E/S)
+                # Pega a primeira letra, converte para maiúscula e mapeia
+                df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).str.upper().str.strip().str[0].map({'E': 1, 'S': -1}).fillna(0)
                 
-                # Cálculo de saldo diário (para corrigir erros de esquecimento de ponto)
+                # Cálculo de saldo acumulado por dia (Reseta o contador a cada dia)
                 df_oc['Data_Dia'] = df_oc['DataHora'].dt.date
                 
                 def calcular_saldo_diario(grupo):
-                    # Garante ordenação
                     grupo = grupo.sort_values('DataHora')
                     grupo['Ocupacao_Dia'] = grupo['Variacao'].cumsum()
-                    # Se começar negativo, ajusta a base do dia
+                    # Ajuste para não ter ocupação negativa (assume erro de registro se < 0)
                     min_val = grupo['Ocupacao_Dia'].min()
                     if min_val < 0:
                         grupo['Ocupacao_Dia'] += abs(min_val)
                     return grupo
 
-                # Groupby seguro após reset_index
                 df_oc = df_oc.groupby('Data_Dia', group_keys=False).apply(calcular_saldo_diario)
                 df_oc['Ocupacao_Acumulada'] = df_oc['Ocupacao_Dia']
                 
             else:
-                # Se não achar as colunas, cria um DF vazio mas não quebra o app
+                st.warning(f"Colunas 'DataHora' e 'EntradaSaida' não encontradas. Colunas lidas: {df_oc.columns.tolist()}")
                 df_oc = pd.DataFrame()
             
         except Exception as e:
-            # Em caso de erro no Excel, segue sem ocupação
-            # st.error(f"Erro Excel: {e}") 
+            # st.error(f"Erro ao ler Excel: {e}") 
             df_oc = pd.DataFrame()
 
         return df_inv, df_oc
@@ -123,7 +122,7 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS (COMPLETO) ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 3.4 (Correção Index)")
+        st.caption("Versão: 3.6 (Horários.xlsx)")
         
         # Sliders detalhados
         with st.expander("Horas de Uso (Perfil Diário)", expanded=True):
@@ -242,7 +241,7 @@ if not df_raw.empty:
                 fig_oc.add_annotation(x=data_pico, y=pico_pessoas, text=f"Pico: {int(pico_pessoas)}", showarrow=True, arrowhead=1)
             st.plotly_chart(fig_oc, use_container_width=True)
         else:
-            st.info("Dados de ocupação não disponíveis. Verifique o arquivo 'Horários.xlsx' no repositório.")
+            st.info("Dados de ocupação não disponíveis. Verifique o link e o conteúdo do arquivo 'Horários.xlsx'.")
 
         fig_dem = go.Figure()
         fig_dem.add_trace(go.Bar(x=['Demanda'], y=[demanda_contratada], name='Contratada', marker_color='green'))
