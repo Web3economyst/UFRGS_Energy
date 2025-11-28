@@ -15,9 +15,8 @@ Ele integra análise de consumo, viabilidade financeira e monitoramento de deman
 
 # --- 1. CARREGAMENTO E TRATAMENTO DE DADOS ---
 
-# URL RAW do arquivo no GitHub (Link direto para o dado bruto)
 DATA_URL_INVENTARIO = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/main/Planilha%20Unificada(Equipamentos%20Consumo).csv"
-# Link ajustado para o arquivo Horários.xlsx conforme sua indicação
+# Link do Excel de Horários
 DATA_URL_OCUPACAO = "https://github.com/Web3economyst/UFRGS_Energy/raw/main/Hor%C3%A1rios.xlsx"
 
 @st.cache_data
@@ -40,11 +39,10 @@ def load_data():
         else:
             df_inv['Id_sala'] = 'Não Identificado'
         
-        # Conversão de Potência (BTU -> Watts)
+        # Conversão de Potência
         def converter_watts(row):
             p = row['num_potencia']
             u = str(row['des_potencia']).upper().strip() if pd.notna(row['des_potencia']) else ""
-            # Estimativa: 1 BTU ~= 0.293W térmicos. Para elétrico (COP~3), divide por 3.
             return p * 0.293 / 3.0 if 'BTU' in u else p
 
         df_inv['Potencia_Real_W'] = df_inv.apply(converter_watts, axis=1)
@@ -54,44 +52,60 @@ def load_data():
         try:
             xls = pd.ExcelFile(DATA_URL_OCUPACAO)
             
-            # Procura aba inteligente
+            # Tenta encontrar a aba certa procurando por colunas chave
             nome_aba_dados = None
             for aba in xls.sheet_names:
                 df_temp = pd.read_excel(xls, sheet_name=aba, nrows=5)
-                cols_upper = [str(c).upper() for c in df_temp.columns]
+                cols_upper = [str(c).upper().strip() for c in df_temp.columns]
+                # Verifica se tem alguma coluna que pareça ser data ou entrada/saida
                 if any(x in cols_upper for x in ['ENTRADASAIDA', 'DATAHORA', 'HORÁRIO', 'TIPO']):
                     nome_aba_dados = aba
                     break
             
-            df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados if nome_aba_dados else 0)
+            # Se não achar, tenta a primeira aba
+            if not nome_aba_dados:
+                nome_aba_dados = xls.sheet_names[0]
+
+            df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados)
             
-            # Limpeza de colunas duplicadas
+            # Limpeza de colunas
             df_oc = df_oc.loc[:, ~df_oc.columns.duplicated()]
             df_oc.columns = df_oc.columns.astype(str).str.strip()
             
-            # Identificação inteligente de colunas
+            # Identificação de Colunas (Busca Inteligente)
             col_data = next((c for c in df_oc.columns if str(c).upper() in ['DATAHORA', 'HORÁRIO', 'DATA', 'HORARIO', 'DATA_HORA']), None)
             col_mov = next((c for c in df_oc.columns if str(c).upper() in ['ENTRADASAIDA', 'TIPO', 'MOVIMENTO', 'ENTRADA_SAIDA']), None)
 
-            if col_data and col_mov:
-                df_oc = df_oc.rename(columns={col_data: 'DataHora', col_mov: 'EntradaSaida'})
+            # Se ainda não achou, tenta pegar pela posição (índice)
+            # Assumindo que DataHora costuma ser a 5ª ou 6ª coluna e EntradaSaida a 6ª ou 7ª (baseado no seu exemplo)
+            if not col_data and len(df_oc.columns) > 4:
+                 # Tenta inferir se a coluna 4 ou 5 tem datas
+                 try:
+                     pd.to_datetime(df_oc.iloc[:, 4], errors='raise')
+                     col_data = df_oc.columns[4]
+                 except:
+                     pass
+
+            if col_data:
+                df_oc = df_oc.rename(columns={col_data: 'DataHora'})
+                if col_mov: df_oc = df_oc.rename(columns={col_mov: 'EntradaSaida'})
                 
                 df_oc['DataHora'] = pd.to_datetime(df_oc['DataHora'], errors='coerce')
-                # Remove linhas sem data e ordena
                 df_oc = df_oc.dropna(subset=['DataHora']).sort_values('DataHora')
-                # Reseta índice para evitar erros de duplicidade
                 df_oc = df_oc.reset_index(drop=True)
                 
-                # Mapeia Movimento (E/S)
-                df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).str.upper().str.strip().str[0].map({'E': 1, 'S': -1}).fillna(0)
+                # Se não tiver coluna de movimento, assume tudo como Entrada (+1) para mostrar pelo menos algo
+                if 'EntradaSaida' in df_oc.columns:
+                    df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).str.upper().str.strip().str[0].map({'E': 1, 'S': -1}).fillna(0)
+                else:
+                    df_oc['Variacao'] = 1 # Fallback
                 
-                # Cálculo de saldo acumulado por dia
+                # Cálculo de saldo diário
                 df_oc['Data_Dia'] = df_oc['DataHora'].dt.date
                 
                 def calcular_saldo_diario(grupo):
                     grupo = grupo.sort_values('DataHora')
                     grupo['Ocupacao_Dia'] = grupo['Variacao'].cumsum()
-                    # Ajuste para não ter ocupação negativa
                     min_val = grupo['Ocupacao_Dia'].min()
                     if min_val < 0:
                         grupo['Ocupacao_Dia'] += abs(min_val)
@@ -101,7 +115,7 @@ def load_data():
                 df_oc['Ocupacao_Acumulada'] = df_oc['Ocupacao_Dia']
                 
             else:
-                df_oc = pd.DataFrame()
+                df_oc = pd.DataFrame() # Falha silenciosa se não achar data
             
         except Exception as e:
             df_oc = pd.DataFrame()
@@ -118,7 +132,7 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS (COMPLETO) ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 3.7 (Perfil por Sala)")
+        st.caption("Versão: 3.8 (Final)")
         
         # Sliders detalhados
         with st.expander("Horas de Uso (Padrão)", expanded=True):
@@ -129,14 +143,14 @@ if not df_raw.empty:
             horas_outros = st.slider("Outros", 0, 24, 6)
             dias_mes = st.number_input("Dias úteis/mês", value=22)
         
-        # --- NOVO: SELETOR DE SALAS 24H ---
+        # --- SELETOR DE SALAS 24H ---
         st.divider()
         st.markdown("🕒 **Exceções de Horário (24h)**")
         lista_salas_unicas = sorted(df_raw['Id_sala'].unique().astype(str))
         salas_24h = st.multiselect(
             "Selecione salas que operam 24h (ex: Servidores, Segurança):",
             options=lista_salas_unicas,
-            help="Equipamentos nestas salas terão o consumo calculado baseando-se em 24h de uso diário, ignorando os sliders acima."
+            help="Equipamentos nestas salas terão o consumo calculado baseando-se em 24h de uso diário."
         )
 
         st.divider()
