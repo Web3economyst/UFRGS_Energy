@@ -10,11 +10,7 @@ st.set_page_config(page_title="Dashboard de Energia UFRGS", layout="wide", page_
 st.title("⚡ Monitoramento de Eficiência Energética")
 st.markdown("""
 Este painel consome dados em tempo real do inventário hospedado no GitHub. 
-Ele processa o consumo estimado e projeta economias com base na modernização dos equipamentos, focando em três pilares principais:
-
-* **⚡ Iluminação (LED + Sensores):** Substituição de lâmpadas fluorescentes por tecnologia LED e instalação de sensores de presença em áreas de circulação.
-* **❄️ Climatização (Inverter + Isolamento):** Troca de aparelhos de ar-condicionado antigos (Janela/On-Off) por modelos Inverter mais eficientes e melhorias no isolamento térmico.
-* **💻 Modernização de Equipamentos:** Renovação do parque tecnológico (substituição de CPUs antigas por Mini PCs) e troca de eletrodomésticos ineficientes.
+Explore os dados abaixo para diagnosticar o consumo atual e projetar cenários de economia.
 """)
 
 # --- 1. CARREGAMENTO E TRATAMENTO DE DADOS ---
@@ -78,19 +74,22 @@ df_raw = load_and_process_data()
 if not df_raw.empty:
     # --- 2. PREMISSAS DE CÁLCULO (INTERATIVAS) ---
     with st.sidebar:
-        st.header("⚙️ Premissas de Cálculo")
-        st.caption("Versão: 1.7 (Seletor de Sala)")
-        st.markdown("Ajuste as horas de uso para refinar a estimativa mensal.")
+        st.header("⚙️ Premissas Operacionais")
+        st.caption("Versão: 1.8 (Controle Total de Horas)")
+        st.markdown("Defina o **perfil de uso diário** para cada grupo de equipamentos:")
         
-        horas_ar = st.slider("Horas/Dia - Ar Condicionado", 0, 24, 8)
-        horas_luz = st.slider("Horas/Dia - Iluminação", 0, 24, 10)
-        horas_pc = st.slider("Horas/Dia - Computadores", 0, 24, 9)
+        horas_ar = st.slider("Ar Condicionado (h/dia)", 0, 24, 8)
+        horas_luz = st.slider("Iluminação (h/dia)", 0, 24, 10)
+        horas_pc = st.slider("Computadores/TI (h/dia)", 0, 24, 9)
+        horas_eletro = st.slider("Eletrodomésticos (h/dia)", 0, 24, 5, help="Média de uso para micro-ondas, cafeteiras, etc. Para geladeiras, considere o tempo de motor ligado (ciclo).")
+        horas_outros = st.slider("Outros Equipamentos (h/dia)", 0, 24, 6)
+        
+        st.divider()
         dias_mes = st.number_input("Dias úteis por mês", value=22)
         tarifa_kwh = st.number_input("Tarifa de Energia (R$/kWh)", value=0.90)
         
-        st.divider()
-        st.markdown("🌱 **Fator de Emissão CO2**")
-        fator_co2 = st.number_input("kg CO2 por kWh (Méd. BR)", value=0.086, format="%.3f")
+        st.markdown("🌱 **Sustentabilidade**")
+        fator_co2 = st.number_input("kg CO2 por kWh", value=0.086, format="%.3f")
 
     # --- 3. CATEGORIZAÇÃO E CÁLCULOS ---
     def agrupar_categoria(cat_original):
@@ -108,10 +107,12 @@ if not df_raw.empty:
         cat = row['Categoria_Macro']
         watts_total = row['Potencia_Total_Item_W']
         
+        # Mapeamento dinâmico das horas
         if cat == 'Climatização': horas = horas_ar
         elif cat == 'Iluminação': horas = horas_luz
         elif cat == 'Informática': horas = horas_pc
-        else: horas = 4 # média para outros
+        elif cat == 'Eletrodomésticos': horas = horas_eletro
+        else: horas = horas_outros
         
         # (Watts * horas * dias) / 1000
         return (watts_total * horas * dias_mes) / 1000
@@ -135,48 +136,87 @@ if not df_raw.empty:
     # Agrupando dados para o Dashboard
     df_dashboard = df_raw.groupby('Categoria_Macro')[['Custo_Mensal_R$', 'Custo_Projetado_R$', 'Economia_Estimada_R$', 'Consumo_Mensal_kWh', 'Economia_kWh']].sum().reset_index()
 
-    # --- 5. VISUALIZAÇÃO NO STREAMLIT ---
-
-    # KPIs do Topo
-    total_custo = df_dashboard['Custo_Mensal_R$'].sum()
-    total_economia = df_dashboard['Economia_Estimada_R$'].sum()
-    total_novo = df_dashboard['Custo_Projetado_R$'].sum()
+    # --- 5. ESTRUTURA DO DASHBOARD ---
     
-    # KPIs Ambientais
-    total_economia_kwh = df_dashboard['Economia_kWh'].sum()
-    co2_evitado_kg = total_economia_kwh * fator_co2
-    arvores_equivalentes = int(co2_evitado_kg / 15) # Estimativa: 1 árvore absorve ~15kg CO2/ano
+    # Abas reordenadas
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Visão Geral do Consumo", 
+        "💡 Potencial de Eficiência", 
+        "📅 Sazonalidade", 
+        "🏢 Detalhes (Andar/Sala)", 
+        "💰 Viabilidade"
+    ])
 
-    col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-    col_kpi1.metric("Fatura Mensal (Atual)", f"R$ {total_custo:,.2f}")
-    col_kpi2.metric("Economia Estimada", f"R$ {total_economia:,.2f}", delta="42%")
-    col_kpi3.metric("CO2 Evitado (Mensal)", f"{co2_evitado_kg:.1f} kg", delta="Sustentabilidade")
-    col_kpi4.metric("Árvores Salvas (Eq.)", f"{arvores_equivalentes} árvores", help="Equivalente em árvores plantadas para absorver esse CO2 em 1 ano.")
-
-    st.divider()
-    
-    # --- ABAS PARA ORGANIZAR O CONTEÚDO ---
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Visão Geral", "📅 Sazonalidade (Anual)", "🏢 Detalhes (Andar/Sala)", "💰 Viabilidade Financeira"])
-
+    # --- ABA 1: VISÃO GERAL DO CONSUMO (DIAGNÓSTICO OPERACIONAL) ---
     with tab1:
-        # Gráficos Principais
-        col_chart1, col_chart2 = st.columns(2)
-
-        with col_chart1:
-            st.subheader("Distribuição de Custos por Tipo")
+        st.subheader("Diagnóstico de Consumo Atual")
+        st.markdown("""
+        Esta visão apresenta o custo estimado baseando-se apenas na **Carga Instalada** e no **Perfil de Uso** definido na barra lateral.
+        Use esta aba para entender onde o dinheiro está indo hoje.
+        """)
+        
+        custo_total_atual = df_dashboard['Custo_Mensal_R$'].sum()
+        consumo_total_kwh = df_dashboard['Consumo_Mensal_kWh'].sum()
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Custo Total Mensal", f"R$ {custo_total_atual:,.2f}")
+        c2.metric("Consumo Energético", f"{consumo_total_kwh:,.0f} kWh")
+        c3.metric("Custo Médio por Dia", f"R$ {(custo_total_atual/dias_mes):,.2f}")
+        
+        st.divider()
+        
+        col_g1, col_g2 = st.columns([1, 2])
+        
+        with col_g1:
+            st.markdown("#### 🥧 Distribuição de Gastos")
             fig_pie = px.pie(df_dashboard, values='Custo_Mensal_R$', names='Categoria_Macro', 
                              hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
             st.plotly_chart(fig_pie, use_container_width=True)
+            
+        with col_g2:
+            st.markdown("#### 🏗️ Detalhe por Categoria")
+            fig_bar_atual = px.bar(df_dashboard, x='Categoria_Macro', y='Custo_Mensal_R$',
+                                   color='Categoria_Macro', text_auto='.2s',
+                                   color_discrete_sequence=px.colors.sequential.RdBu)
+            fig_bar_atual.update_layout(showlegend=False, yaxis_title="Custo Estimado (R$)", xaxis_title="")
+            st.plotly_chart(fig_bar_atual, use_container_width=True)
 
-        with col_chart2:
-            st.subheader("Comparativo de Economia por Setor")
-            fig_bar = go.Figure()
-            fig_bar.add_trace(go.Bar(x=df_dashboard['Categoria_Macro'], y=df_dashboard['Custo_Mensal_R$'], name='Custo Atual', marker_color='#EF553B'))
-            fig_bar.add_trace(go.Bar(x=df_dashboard['Categoria_Macro'], y=df_dashboard['Custo_Projetado_R$'], name='Custo Otimizado', marker_color='#00CC96'))
-            fig_bar.update_layout(barmode='group', xaxis_title="Categoria", yaxis_title="Custo (R$)")
-            st.plotly_chart(fig_bar, use_container_width=True)
-
+    # --- ABA 2: POTENCIAL DE EFICIÊNCIA (ANTIGA VISÃO GERAL) ---
     with tab2:
+        st.subheader("Projeção de Modernização Tecnológica")
+        st.markdown("""
+        Comparativo entre o **Cenário Atual** (calculado na aba anterior) e o **Cenário Eficiente** (após substituição de equipamentos).
+        
+        * **Premissas de Eficiência:** LED (60%), Inverter (40%), Mini PCs (30%).
+        """)
+
+        # KPIs do Topo
+        total_economia = df_dashboard['Economia_Estimada_R$'].sum()
+        total_novo = df_dashboard['Custo_Projetado_R$'].sum()
+        perc_economia = (total_economia / custo_total_atual) * 100 if custo_total_atual > 0 else 0
+        
+        # KPIs Ambientais
+        total_economia_kwh = df_dashboard['Economia_kWh'].sum()
+        co2_evitado_kg = total_economia_kwh * fator_co2
+        arvores_equivalentes = int(co2_evitado_kg / 15)
+
+        col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+        col_kpi1.metric("Fatura Mensal (Atual)", f"R$ {custo_total_atual:,.2f}", help="Baseado no uso definido na barra lateral")
+        col_kpi2.metric("Fatura Projetada (Eficiente)", f"R$ {total_novo:,.2f}", delta=f"-{perc_economia:.1f}%", delta_color="inverse")
+        col_kpi3.metric("Economia Financeira", f"R$ {total_economia:,.2f}", delta="Mensal")
+        col_kpi4.metric("Impacto Ambiental", f"{co2_evitado_kg:.0f} kg CO2", delta=f"{arvores_equivalentes} árvores")
+
+        st.divider()
+
+        # Gráfico Comparativo
+        st.subheader("📉 Antes vs. Depois (Por Setor)")
+        fig_bar = go.Figure()
+        fig_bar.add_trace(go.Bar(x=df_dashboard['Categoria_Macro'], y=df_dashboard['Custo_Mensal_R$'], name='Custo Atual', marker_color='#EF553B'))
+        fig_bar.add_trace(go.Bar(x=df_dashboard['Categoria_Macro'], y=df_dashboard['Custo_Projetado_R$'], name='Custo Otimizado', marker_color='#00CC96'))
+        fig_bar.update_layout(barmode='group', xaxis_title="Categoria", yaxis_title="Custo (R$)")
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    with tab3:
         st.subheader("📅 Projeção de Consumo Anual (Sazonalidade)")
         st.markdown("""
         Esta simulação considera que o uso do **Ar Condicionado** varia ao longo do ano.
@@ -220,7 +260,7 @@ if not df_raw.empty:
         custo_anual_proj = df_sazonal[df_sazonal['Cenário']=='Custo Otimizado']['Valor (R$)'].sum()
         st.info(f"💰 **Economia Anual Projetada:** R$ {(custo_anual_atual - custo_anual_proj):,.2f}")
 
-    with tab3:
+    with tab4:
         # VISUALIZAÇÃO POR ANDAR
         st.subheader("🏢 Análise de Custo por Andar")
         
@@ -281,7 +321,7 @@ if not df_raw.empty:
                 use_container_width=True
             )
 
-    with tab4:
+    with tab5:
         st.subheader("💰 Viabilidade Econômica (ROI)")
         st.markdown("Estime o investimento (CAPEX) necessário para as substituições e calcule o tempo de retorno (Payback).")
 
