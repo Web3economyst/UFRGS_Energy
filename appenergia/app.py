@@ -54,28 +54,27 @@ def load_data():
         try:
             xls = pd.ExcelFile(DATA_URL_OCUPACAO)
             
-            # Procura aba que contenha as colunas especificadas (DataHora, EntradaSaida)
+            # Procura aba inteligente
             nome_aba_dados = None
             for aba in xls.sheet_names:
                 df_temp = pd.read_excel(xls, sheet_name=aba, nrows=5)
-                cols_limpas = [str(c).strip() for c in df_temp.columns]
-                # Verifica se as colunas exatas estão presentes
-                if 'DataHora' in cols_limpas and 'EntradaSaida' in cols_limpas:
+                cols_upper = [str(c).upper() for c in df_temp.columns]
+                if any(x in cols_upper for x in ['ENTRADASAIDA', 'DATAHORA', 'HORÁRIO', 'TIPO']):
                     nome_aba_dados = aba
                     break
             
-            # Se não achar pelos nomes exatos, tenta a primeira aba
-            if not nome_aba_dados:
-                nome_aba_dados = xls.sheet_names[0]
-
-            df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados)
+            df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados if nome_aba_dados else 0)
             
-            # Limpeza de colunas duplicadas e espaços
+            # Limpeza de colunas duplicadas
             df_oc = df_oc.loc[:, ~df_oc.columns.duplicated()]
             df_oc.columns = df_oc.columns.astype(str).str.strip()
             
-            # Verifica colunas essenciais
-            if 'DataHora' in df_oc.columns and 'EntradaSaida' in df_oc.columns:
+            # Identificação inteligente de colunas
+            col_data = next((c for c in df_oc.columns if str(c).upper() in ['DATAHORA', 'HORÁRIO', 'DATA', 'HORARIO', 'DATA_HORA']), None)
+            col_mov = next((c for c in df_oc.columns if str(c).upper() in ['ENTRADASAIDA', 'TIPO', 'MOVIMENTO', 'ENTRADA_SAIDA']), None)
+
+            if col_data and col_mov:
+                df_oc = df_oc.rename(columns={col_data: 'DataHora', col_mov: 'EntradaSaida'})
                 
                 df_oc['DataHora'] = pd.to_datetime(df_oc['DataHora'], errors='coerce')
                 # Remove linhas sem data e ordena
@@ -84,16 +83,15 @@ def load_data():
                 df_oc = df_oc.reset_index(drop=True)
                 
                 # Mapeia Movimento (E/S)
-                # Pega a primeira letra, converte para maiúscula e mapeia
                 df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).str.upper().str.strip().str[0].map({'E': 1, 'S': -1}).fillna(0)
                 
-                # Cálculo de saldo acumulado por dia (Reseta o contador a cada dia)
+                # Cálculo de saldo acumulado por dia
                 df_oc['Data_Dia'] = df_oc['DataHora'].dt.date
                 
                 def calcular_saldo_diario(grupo):
                     grupo = grupo.sort_values('DataHora')
                     grupo['Ocupacao_Dia'] = grupo['Variacao'].cumsum()
-                    # Ajuste para não ter ocupação negativa (assume erro de registro se < 0)
+                    # Ajuste para não ter ocupação negativa
                     min_val = grupo['Ocupacao_Dia'].min()
                     if min_val < 0:
                         grupo['Ocupacao_Dia'] += abs(min_val)
@@ -103,11 +101,9 @@ def load_data():
                 df_oc['Ocupacao_Acumulada'] = df_oc['Ocupacao_Dia']
                 
             else:
-                st.warning(f"Colunas 'DataHora' e 'EntradaSaida' não encontradas. Colunas lidas: {df_oc.columns.tolist()}")
                 df_oc = pd.DataFrame()
             
         except Exception as e:
-            # st.error(f"Erro ao ler Excel: {e}") 
             df_oc = pd.DataFrame()
 
         return df_inv, df_oc
@@ -122,10 +118,10 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS (COMPLETO) ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 3.6 (Horários.xlsx)")
+        st.caption("Versão: 3.7 (Perfil por Sala)")
         
         # Sliders detalhados
-        with st.expander("Horas de Uso (Perfil Diário)", expanded=True):
+        with st.expander("Horas de Uso (Padrão)", expanded=True):
             horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
             horas_luz = st.slider("Iluminação", 0, 24, 10)
             horas_pc = st.slider("Computadores/TI", 0, 24, 9)
@@ -133,6 +129,16 @@ if not df_raw.empty:
             horas_outros = st.slider("Outros", 0, 24, 6)
             dias_mes = st.number_input("Dias úteis/mês", value=22)
         
+        # --- NOVO: SELETOR DE SALAS 24H ---
+        st.divider()
+        st.markdown("🕒 **Exceções de Horário (24h)**")
+        lista_salas_unicas = sorted(df_raw['Id_sala'].unique().astype(str))
+        salas_24h = st.multiselect(
+            "Selecione salas que operam 24h (ex: Servidores, Segurança):",
+            options=lista_salas_unicas,
+            help="Equipamentos nestas salas terão o consumo calculado baseando-se em 24h de uso diário, ignorando os sliders acima."
+        )
+
         st.divider()
         st.markdown("⚡ **Tarifas e Contrato**")
         tarifa_kwh = st.number_input("Tarifa Consumo (R$/kWh)", value=0.65)
@@ -153,15 +159,19 @@ if not df_raw.empty:
 
     df_raw['Categoria_Macro'] = df_raw['des_categoria'].apply(agrupar_categoria)
     
-    # Cálculo de Consumo (kWh)
+    # Cálculo de Consumo (kWh) - COM LÓGICA DE SALAS 24H
     def calc_consumo(row):
-        cat = row['Categoria_Macro']
-        # Mapeamento detalhado
-        if cat == 'Climatização': h = horas_ar
-        elif cat == 'Iluminação': h = horas_luz
-        elif cat == 'Informática': h = horas_pc
-        elif cat == 'Eletrodomésticos': h = horas_eletro
-        else: h = horas_outros
+        # Verifica se a sala está na lista de exceções
+        if str(row['Id_sala']) in salas_24h:
+            h = 24
+        else:
+            cat = row['Categoria_Macro']
+            if cat == 'Climatização': h = horas_ar
+            elif cat == 'Iluminação': h = horas_luz
+            elif cat == 'Informática': h = horas_pc
+            elif cat == 'Eletrodomésticos': h = horas_eletro
+            else: h = horas_outros
+            
         return (row['Potencia_Total_Item_W'] * h * dias_mes) / 1000
 
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(calc_consumo, axis=1)
