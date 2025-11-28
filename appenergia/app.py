@@ -124,7 +124,7 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 3.9 (Fix URL + Pico 24h)")
+        st.caption("Versão: 4.0 (Final - Sem Erros)")
         
         with st.expander("Horas de Uso (Padrão)", expanded=True):
             horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
@@ -140,7 +140,7 @@ if not df_raw.empty:
         salas_24h = st.multiselect(
             "Selecione salas que operam 24h (ex: Servidores, Segurança):",
             options=lista_salas_unicas,
-            help="Equipamentos nestas salas entrarão na Carga Base (Pico) e terão consumo de 24h."
+            help="Equipamentos nestas salas terão o consumo calculado baseando-se em 24h de uso diário."
         )
 
         st.divider()
@@ -317,20 +317,20 @@ if not df_raw.empty:
         # Lógica de distribuição (Prioridade ROI)
         # 1. Luz
         q_luz = df_raw[df_raw['Categoria_Macro']=='Iluminação']['Quant'].sum()
-        $luz = min(invest, q_luz * custo_led)
-        rest1 = invest - $luz
-        n_luz = int($luz / custo_led)
+        valor_luz = min(invest, q_luz * custo_led)
+        rest1 = invest - valor_luz
+        n_luz = int(valor_luz / custo_led)
         
         # 2. Ar
         q_ar = df_raw[df_raw['Categoria_Macro']=='Climatização']['Quant'].sum()
-        $ar = min(rest1, q_ar * custo_inv)
-        rest2 = rest1 - $ar
-        n_ar = int($ar / custo_inv)
+        valor_ar = min(rest1, q_ar * custo_inv)
+        rest2 = rest1 - valor_ar
+        n_ar = int(valor_ar / custo_inv)
         
         # 3. PC
         q_pc = df_raw[df_raw['Categoria_Macro']=='Informática']['Quant'].sum()
-        $pc = min(rest2, q_pc * custo_pc)
-        n_pc = int($pc / custo_pc)
+        valor_pc = min(rest2, q_pc * custo_pc)
+        n_pc = int(valor_pc / custo_pc)
         
         st.info(f"Plano Sugerido: {n_luz} Lâmpadas + {n_ar} Ares + {n_pc} PCs")
         
