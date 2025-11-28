@@ -64,6 +64,9 @@ def load_data():
                     break
             
             df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados if nome_aba_dados else 0)
+            
+            # Limpeza de colunas duplicadas (Ajuste Solicitado 1)
+            df_oc = df_oc.loc[:, ~df_oc.columns.duplicated()]
             df_oc.columns = df_oc.columns.str.strip()
             
             # Mapeamento de colunas flexível
@@ -92,7 +95,7 @@ def load_data():
                 df_oc = pd.DataFrame() # Falha segura
             
         except Exception as e:
-            st.warning(f"Aviso: Dados de ocupação não carregados ({e})")
+            # st.warning(f"Aviso: Dados de ocupação não carregados ({e})") # Comentado para limpar visual se falhar
             df_oc = pd.DataFrame()
 
         return df_inv, df_oc
@@ -107,7 +110,7 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS (COMPLETO) ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 3.0 (Integrada)")
+        st.caption("Versão: 3.1 (Ajustes Finais)")
         
         # Sliders detalhados (Do código 1.8)
         with st.expander("Horas de Uso (Perfil Diário)", expanded=True):
@@ -225,7 +228,7 @@ if not df_raw.empty:
                 fig_oc.add_annotation(x=data_pico, y=pico_pessoas, text=f"Pico: {int(pico_pessoas)}", showarrow=True, arrowhead=1)
             st.plotly_chart(fig_oc, use_container_width=True)
         else:
-            st.info("Carregue dados de ocupação para ver a curva.")
+            st.info("Dados de ocupação não disponíveis. Verifique o arquivo Excel.")
 
         fig_dem = go.Figure()
         fig_dem.add_trace(go.Bar(x=['Demanda'], y=[demanda_contratada], name='Contratada', marker_color='green'))
@@ -298,27 +301,65 @@ if not df_raw.empty:
         st.divider()
         salas = sorted(df_raw['Id_sala'].unique().astype(str))
         sel_sala = st.selectbox("Selecione uma Sala:", salas)
+        
         if sel_sala:
             df_s = df_raw[df_raw['Id_sala'] == sel_sala]
+            custo_sala_total = df_s['Custo_Mensal_R$'].sum() # Ajuste 2
+            
+            # KPI de destaque para a Sala
+            st.metric(f"Custo Total da Sala {sel_sala}", f"R$ {custo_sala_total:,.2f}")
+            
             st.dataframe(df_s[['des_nome_equipamento', 'Quant', 'num_potencia', 'Custo_Mensal_R$']].sort_values('Custo_Mensal_R$', ascending=False))
 
     # ABA 6: VIABILIDADE (ROI)
     with tab6:
-        st.subheader("Simulador de Investimento (Payback)")
-        col_inv1, col_inv2 = st.columns(2)
-        inv_lampada = col_inv1.number_input("Custo Lâmpada LED (R$)", 25.0)
-        inv_ac = col_inv2.number_input("Custo Ar Inverter (R$)", 3500.0)
+        st.subheader("Simulador de Projeto (ROI)")
         
-        qtd_lamp = df_raw[df_raw['Categoria_Macro']=='Iluminação']['Quant'].sum()
-        qtd_ac = df_raw[df_raw['Categoria_Macro']=='Climatização']['Quant'].sum() * 0.4 # 40% troca
+        # Ajuste 3: Interatividade Aumentada
+        col_proj1, col_proj2 = st.columns(2)
         
-        capex = (qtd_lamp * inv_lampada) + (qtd_ac * inv_ac)
-        payback = capex / total_eco_rs if total_eco_rs > 0 else 0
+        with col_proj1:
+            st.markdown("#### 🎯 Definir Meta de Projeto")
+            meta_invest = st.number_input("Quanto você quer investir? (R$)", value=50000.0, step=5000.0)
+            
+        with col_proj2:
+            st.markdown("#### 💰 Custo Unitário de Equipamentos")
+            inv_lampada = st.number_input("Lâmpada LED (R$)", 25.0)
+            inv_ac = st.number_input("Ar Inverter (R$)", 3500.0)
+            inv_pc = st.number_input("Mini PC (R$)", 2800.0)
+
+        st.divider()
         
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Investimento (CAPEX)", f"R$ {capex:,.2f}")
-        c2.metric("Retorno (Meses)", f"{payback:.1f} meses")
-        c3.metric("Retorno (Anos)", f"{payback/12:.1f} anos")
+        # Simulação Automática baseada no investimento
+        # Prioridade: 1. Luz (ROI rápido), 2. Ar (Grande impacto), 3. PC
+        
+        qtd_lamp_total = df_raw[df_raw['Categoria_Macro']=='Iluminação']['Quant'].sum()
+        max_inv_luz = qtd_lamp_total * inv_lampada
+        
+        investido_luz = min(meta_invest, max_inv_luz)
+        sobra_1 = meta_invest - investido_luz
+        luzes_trocadas = int(investido_luz / inv_lampada)
+        
+        qtd_ac_total = df_raw[df_raw['Categoria_Macro']=='Climatização']['Quant'].sum()
+        max_inv_ac = qtd_ac_total * inv_ac
+        
+        investido_ac = min(sobra_1, max_inv_ac)
+        sobra_2 = sobra_1 - investido_ac
+        acs_trocados = int(investido_ac / inv_ac)
+        
+        # Resultados
+        st.markdown(f"**Com R$ {meta_invest:,.2f}, você pode trocar:**")
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Lâmpadas", f"{luzes_trocadas} un.", help="100% da verba vai pra luz primeiro (melhor ROI)")
+        k2.metric("Ares-Condicionados", f"{acs_trocados} un.", help="O que sobrar, vai para Ar Condicionado")
+        
+        # Cálculo de Retorno dessa simulação específica
+        eco_luz = luzes_trocadas * (0.030 * 10 * 22 * tarifa_kwh * 0.6) # Estimativa simples de economia unitária
+        eco_ac = acs_trocados * (1.4 * 8 * 22 * tarifa_kwh * 0.4)
+        eco_total_proj = eco_luz + eco_ac
+        
+        payback_proj = meta_invest / eco_total_proj if eco_total_proj > 0 else 0
+        k3.metric("Payback Estimado", f"{payback_proj:.1f} meses")
 
 else:
     st.warning("Aguardando carregamento dos dados...")
