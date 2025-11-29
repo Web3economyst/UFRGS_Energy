@@ -27,8 +27,12 @@ def normalizar_texto(texto):
 
 @st.cache_data
 def load_data():
+    erro_oc = None
+    df_inv = pd.DataFrame()
+    df_oc = pd.DataFrame()
+
+    # --- A. CARGA INVENTÁRIO (CSV) ---
     try:
-        # --- A. CARGA INVENTÁRIO (CSV) ---
         df_inv = pd.read_csv(DATA_URL_INVENTARIO, encoding='cp1252', on_bad_lines='skip') 
         df_inv.columns = df_inv.columns.str.strip()
         df_inv['Quant'] = pd.to_numeric(df_inv['Quant'], errors='coerce').fillna(1)
@@ -54,69 +58,72 @@ def load_data():
 
         df_inv['Potencia_Real_W'] = df_inv.apply(converter_watts, axis=1)
         df_inv['Potencia_Total_Item_W'] = df_inv['Potencia_Real_W'] * df_inv['Quant']
-        
-        # --- B. CARGA OCUPAÇÃO (ROBUSTA) ---
-        df_oc = pd.DataFrame()
-        erro_oc = None
-        
-        try:
-            # 1. Tenta ler como Excel (Padrão)
-            try:
-                # Tenta ler direto sem verificar abas primeiro para testar o arquivo
-                df_oc = pd.read_excel(DATA_URL_OCUPACAO, engine='openpyxl')
-            except:
-                # 2. Se falhar, tenta ler como CSV (Fallback caso o formato esteja trocado)
-                df_oc = pd.read_csv(DATA_URL_OCUPACAO, sep=None, engine='python', encoding='cp1252')
-
-            # Limpeza de colunas
-            df_oc = df_oc.loc[:, ~df_oc.columns.duplicated()]
-            
-            # Identificação inteligente de colunas (DataHora e EntradaSaida)
-            col_data = next((c for c in df_oc.columns if normalizar_texto(c) in ['DATAHORA', 'HORARIO', 'DATA', 'DATA_HORA']), None)
-            col_mov = next((c for c in df_oc.columns if normalizar_texto(c) in ['ENTRADASAIDA', 'TIPO', 'MOVIMENTO', 'ENTRADA_SAIDA']), None)
-
-            if col_data:
-                df_oc = df_oc.rename(columns={col_data: 'DataHora'})
-                if col_mov: df_oc = df_oc.rename(columns={col_mov: 'EntradaSaida'})
-                
-                df_oc['DataHora'] = pd.to_datetime(df_oc['DataHora'], errors='coerce')
-                df_oc = df_oc.dropna(subset=['DataHora']).sort_values('DataHora')
-                df_oc = df_oc.reset_index(drop=True)
-                
-                # Tratamento de Movimento (E/S -> 1/-1)
-                if 'EntradaSaida' in df_oc.columns:
-                    # Pega a primeira letra (E ou S)
-                    df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).apply(lambda x: normalizar_texto(x)[0] if len(x)>0 else '').map({'E': 1, 'S': -1}).fillna(0)
-                else:
-                    df_oc['Variacao'] = 0 
-
-                # Cálculo de saldo diário (Resetando a zero a cada dia)
-                df_oc['Data_Dia'] = df_oc['DataHora'].dt.date
-                
-                def calcular_saldo_diario(grupo):
-                    grupo = grupo.sort_values('DataHora')
-                    grupo['Ocupacao_Dia'] = grupo['Variacao'].cumsum()
-                    # Se começar negativo no dia, ajusta a base
-                    min_val = grupo['Ocupacao_Dia'].min()
-                    if min_val < 0: grupo['Ocupacao_Dia'] += abs(min_val)
-                    return grupo
-
-                if not df_oc.empty:
-                    df_oc = df_oc.groupby('Data_Dia', group_keys=False).apply(calcular_saldo_diario)
-                    df_oc['Ocupacao_Acumulada'] = df_oc['Ocupacao_Dia']
-            else:
-                erro_oc = "Colunas de Data/Hora não encontradas."
-                df_oc = pd.DataFrame()
-            
-        except Exception as e:
-            erro_oc = str(e)
-            df_oc = pd.DataFrame()
-
-        return df_inv, df_oc, erro_oc
-
     except Exception as e:
-        st.error(f"Erro crítico ao carregar inventário: {e}")
-        return pd.DataFrame(), pd.DataFrame(), str(e)
+        st.error(f"Erro ao carregar inventário: {e}")
+
+    # --- B. CARGA OCUPAÇÃO (EXCEL) ---
+    try:
+        # Tenta ler o arquivo Excel
+        # Usa engine openpyxl para xlsx
+        xls = pd.ExcelFile(DATA_URL_OCUPACAO, engine='openpyxl')
+        
+        # Procura aba correta normalizando nomes
+        nome_aba_dados = None
+        for aba in xls.sheet_names:
+            df_temp = pd.read_excel(xls, sheet_name=aba, nrows=5)
+            cols_norm = [normalizar_texto(c) for c in df_temp.columns]
+            if any(x in cols_norm for x in ['ENTRADASAIDA', 'DATAHORA', 'HORARIO', 'TIPO']):
+                nome_aba_dados = aba
+                break
+        
+        # Lê a aba encontrada ou a primeira
+        df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados if nome_aba_dados else 0)
+        
+        # Limpeza de colunas duplicadas
+        df_oc = df_oc.loc[:, ~df_oc.columns.duplicated()]
+        
+        # Mapeamento de colunas flexível (Normalizado)
+        col_data = next((c for c in df_oc.columns if normalizar_texto(c) in ['DATAHORA', 'HORARIO', 'DATA', 'DATA_HORA']), None)
+        col_mov = next((c for c in df_oc.columns if normalizar_texto(c) in ['ENTRADASAIDA', 'TIPO', 'MOVIMENTO', 'ENTRADA_SAIDA']), None)
+
+        if col_data:
+            df_oc = df_oc.rename(columns={col_data: 'DataHora'})
+            if col_mov: df_oc = df_oc.rename(columns={col_mov: 'EntradaSaida'})
+            
+            df_oc['DataHora'] = pd.to_datetime(df_oc['DataHora'], errors='coerce')
+            df_oc = df_oc.dropna(subset=['DataHora']).sort_values('DataHora')
+            df_oc = df_oc.reset_index(drop=True)
+            
+            # Tratamento de Movimento (E/S -> 1/-1)
+            if 'EntradaSaida' in df_oc.columns:
+                # Pega a primeira letra (E ou S), normaliza e mapeia
+                df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).apply(lambda x: normalizar_texto(x)[0] if len(x)>0 else '').map({'E': 1, 'S': -1}).fillna(0)
+            else:
+                df_oc['Variacao'] = 0 
+
+            # Cálculo de saldo diário (Match por Data)
+            df_oc['Data_Dia'] = df_oc['DataHora'].dt.date
+            
+            def calcular_saldo_diario(grupo):
+                grupo = grupo.sort_values('DataHora')
+                grupo['Ocupacao_Dia'] = grupo['Variacao'].cumsum()
+                # Se começar negativo no dia, ajusta a base para zero
+                min_val = grupo['Ocupacao_Dia'].min()
+                if min_val < 0: grupo['Ocupacao_Dia'] += abs(min_val)
+                return grupo
+
+            if not df_oc.empty:
+                df_oc = df_oc.groupby('Data_Dia', group_keys=False).apply(calcular_saldo_diario)
+                df_oc['Ocupacao_Acumulada'] = df_oc['Ocupacao_Dia']
+        else:
+            erro_oc = "Colunas de Data/Hora não encontradas no Excel."
+            df_oc = pd.DataFrame()
+        
+    except Exception as e:
+        erro_oc = str(e)
+        df_oc = pd.DataFrame()
+
+    return df_inv, df_oc, erro_oc
 
 df_raw, df_ocupacao, erro_ocupacao = load_data()
 
@@ -124,7 +131,7 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 4.2 (Demanda Auto-Ajustável)")
+        st.caption("Versão: 4.3 (Correção Sintaxe)")
         
         with st.expander("Horas de Uso (Padrão)", expanded=True):
             horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
@@ -210,7 +217,7 @@ if not df_raw.empty:
         # Fallback
         demanda_estimada_pico = potencia_salas_24h_kw + (potencia_resto_kw * 0.5)
 
-    # --- AJUSTE SOLICITADO: Contratada = Estimada ---
+    # --- AJUSTE: Contratada = Estimada ---
     demanda_contratada = demanda_estimada_pico
 
     # --- 5. CÁLCULO DE ECONOMIA (PROJEÇÃO) ---
@@ -252,7 +259,6 @@ if not df_raw.empty:
         
         if not df_ocupacao.empty:
             fig_oc = px.line(df_ocupacao, x='DataHora', y='Ocupacao_Acumulada', title='Curva de Ocupação Real (Pessoas no Prédio)')
-            # Adiciona anotação do pico
             if pico_pessoas > 0:
                 fig_oc.add_annotation(x=data_pico, y=pico_pessoas, text=f"Pico: {int(pico_pessoas)}", showarrow=True, arrowhead=1)
             st.plotly_chart(fig_oc, use_container_width=True)
