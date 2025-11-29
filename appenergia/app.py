@@ -158,13 +158,13 @@ if not df_raw.empty:
         lambda x: x['Potencia_Instalada_kW'] * fatores_demanda.get(x['Categoria_Macro'], 0.5), axis=1
     )
 
+    # --- TOTAIS GLOBAIS ---
     total_instalado_kw = df_raw['Potencia_Instalada_kW'].sum()
     total_demanda_pico_kw = df_raw['Demanda_Estimada_kW'].sum()
+    consumo_total_kwh = df_raw['Consumo_Mensal_kWh'].sum()
     
-    # Custo Fixo de Demanda
+    # Custos
     custo_demanda_fixo = total_demanda_pico_kw * tarifa_kw_demanda
-    
-    # Custo Variável de Consumo
     custo_total_consumo = df_raw['Custo_Consumo_R$'].sum()
     
     # --- 4. VISUALIZAÇÃO ---
@@ -183,9 +183,7 @@ if not df_raw.empty:
         with st.expander("📚 Por que esse valor é diferente do Consumo?", expanded=False):
             st.markdown(r"""
             **Este painel calcula apenas o 'Aluguel do Fio' (Demanda Contratada).**
-            
-            * Imagine um plano de internet: Você paga um valor fixo pela velocidade (ex: 500 Mega).
-            * Isso é a **Demanda (kW)**. Você paga para ter essa capacidade disponível, usando ou não.
+            * Você paga um valor fixo pela velocidade (potência - kW), usando ou não.
             * O valor abaixo é o custo sugerido de contrato para suportar seus equipamentos.
             """)
 
@@ -193,8 +191,6 @@ if not df_raw.empty:
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Potência Instalada (Total)", f"{total_instalado_kw:,.1f} kW")
         col2.metric("Pico Estimado (Contrato Ideal)", f"{total_demanda_pico_kw:,.1f} kW")
-        
-        # MUDANÇA DE NOME PARA EVITAR CONFUSÃO
         col3.metric("Custo Fixo (Demanda)", f"R$ {custo_demanda_fixo:,.2f}", help="Valor fixo mensal pago pela disponibilidade (kW x Tarifa Demanda)")
         
         if not df_ocupacao.empty:
@@ -213,7 +209,8 @@ if not df_raw.empty:
         
         st.divider()
 
-        c_gauge, c_tbl = st.columns([1, 1.5])
+        # Gauge & Info Técnica
+        c_gauge, c_info = st.columns([1, 1.5])
         
         with c_gauge:
             fig_gauge = go.Figure(go.Indicator(
@@ -236,32 +233,67 @@ if not df_raw.empty:
             st.plotly_chart(fig_gauge, use_container_width=True)
             kVA_calc = total_demanda_pico_kw / 0.92
             st.info(f"Transformador Recomendado: **{kVA_calc:.0f} kVA** (FP 0.92).")
-
-        with c_tbl:
+        
+        with c_info:
             st.markdown("#### Composição do Custo de Demanda")
             df_demanda_cat = df_raw.groupby('Categoria_Macro')[['Potencia_Instalada_kW', 'Demanda_Estimada_kW']].sum().reset_index()
             df_demanda_cat['Fator Demanda'] = df_demanda_cat['Categoria_Macro'].map(fatores_demanda)
-            
-            # Custo Estimado POR CATEGORIA DE DEMANDA
             df_demanda_cat['Custo Demanda (R$)'] = df_demanda_cat['Demanda_Estimada_kW'] * tarifa_kw_demanda
-            
             df_demanda_cat = df_demanda_cat.sort_values('Demanda_Estimada_kW', ascending=False)
-            
             st.dataframe(
                 df_demanda_cat.style.format({
                     "Potencia_Instalada_kW": "{:.1f} kW",
                     "Demanda_Estimada_kW": "{:.1f} kW",
                     "Fator Demanda": "{:.2f}",
                     "Custo Demanda (R$)": "R$ {:.2f}"
-                }), 
-                use_container_width=True, hide_index=True
+                }), use_container_width=True, hide_index=True
             )
+
+        st.divider()
+
+        # ============================================================
+        # 🔍 ADIÇÃO: Comparação entre Pico Estimado (kW) e Consumo Real (kWh)
+        # ============================================================
+        st.markdown("### 🔎 Comparação Automática: Uso Real vs Capacidade Estimada")
+
+        # Potência média equivalente (convertendo kWh -> kW)
+        potencia_media_kw = consumo_total_kwh / 720   # 30 dias * 24 h = 720 h
+
+        # Percentuais de utilização
+        pct_uso_demanda = (potencia_media_kw / total_demanda_pico_kw) * 100 if total_demanda_pico_kw > 0 else 0
+        pct_uso_instalada = (potencia_media_kw / total_instalado_kw) * 100 if total_instalado_kw > 0 else 0
+
+        c_cmp1, c_cmp2, c_cmp3 = st.columns(3)
+
+        c_cmp1.metric(
+            "Potência Média Equivalente",
+            f"{potencia_media_kw:,.1f} kW",
+            help="Convertido do consumo mensal total (kWh → kW médio)."
+        )
+
+        c_cmp2.metric(
+            "Uso vs Pico Estimado",
+            f"{pct_uso_demanda:.1f}%",
+            help=f"Pico Estimado = {total_demanda_pico_kw:.1f} kW"
+        )
+
+        c_cmp3.metric(
+            "Uso vs Potência Instalada",
+            f"{pct_uso_instalada:.1f}%",
+            help=f"Total Instalado = {total_instalado_kw:.1f} kW"
+        )
+
+        # Interpretação automática
+        if pct_uso_demanda < 70:
+            st.success("✅ O uso real está BEM dentro do limite do dimensionamento.")
+        elif pct_uso_demanda < 100:
+            st.info("⚠️ O uso real está dentro do limite, mas próximo do pico estimado.")
+        else:
+            st.warning("🚨 O uso REAL ultrapassa o pico estimado — revise a demanda contratada.")
 
     # --- ABA 2: CONSUMO (CUSTO VARIÁVEL) ---
     with tab2:
         st.subheader("Consumo de Energia (Custo Variável de Uso)")
-        
-        consumo_total_kwh = df_raw['Consumo_Mensal_kWh'].sum()
         
         # SOMA DOS DOIS CUSTOS PARA VISÃO GERAL
         fatura_total_estimada = custo_demanda_fixo + custo_total_consumo
@@ -269,8 +301,6 @@ if not df_raw.empty:
         k1, k2, k3 = st.columns(3)
         k1.metric("Consumo Mensal Total", f"{consumo_total_kwh:,.0f} kWh")
         k2.metric("Custo Variável (Energia)", f"R$ {custo_total_consumo:,.2f}", help="Valor pago pelo que foi consumido (kWh)")
-        
-        # NOVO KPI SOMANDO TUDO
         k3.metric("Fatura Total Estimada", f"R$ {fatura_total_estimada:,.2f}", 
                   delta="Demanda (Fixo) + Consumo (Variável)", delta_color="off",
                   help="Soma do custo fixo da Aba 1 com o custo variável desta aba.")
