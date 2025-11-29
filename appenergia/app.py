@@ -15,8 +15,9 @@ Painel completo para **dimensionamento de demanda**, **consumo**,
 **análise de ocupação**, **eficiência** e **viabilidade econômica**.
 
 Inclui:
-- Cálculo realista com **sazonalidade avançada** - Comparação entre **Pico de Demanda (kW)** e **Uso Real (kWh)** - Transformador recomendado  
-- Dimensionamento de salas e andares  
+- Cálculo realista com **sazonalidade avançada**
+- Comparação entre **Pico de Demanda (kW)** e **Uso Real (kWh)**
+- Transformador recomendado
 """)
 
 # ---------------------------------------------------
@@ -127,14 +128,13 @@ if not df_raw.empty:
         with st.expander("Horas de Uso por Categoria", expanded=True):
             horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
             horas_luz = st.slider("Iluminação", 0, 24, 10)
-            # Destaque: Agora este slider afetará corretamente a categoria Informática
-            horas_pc = st.slider("Informática", 0, 24, 9, help="Afeta computadores, monitores e equipamentos de TI")
-            horas_eletro = st.slider("Eletrodomésticos", 0, 24, 5)
+            horas_pc = st.slider("Informática", 0, 24, 9)
+            horas_eletro = st.slider("Eletrodomésticos", 0, 24, 5, help="Geladeiras, micro-ondas, cafeteiras, etc.")
             horas_outros = st.slider("Outros", 0, 24, 6)
             dias_mes = st.number_input("Dias no mês", value=22)
 
     # ---------------------------------------------------
-    # 3. CÁLCULOS TÉCNICOS (AGRUPAMENTO CORRIGIDO)
+    # 3. CÁLCULOS TÉCNICOS (AGRUPAMENTO CORRIGIDO COMPLETO)
     # ---------------------------------------------------
 
     def agrupar(cat):
@@ -142,12 +142,20 @@ if not df_raw.empty:
         if "CLIM" in c or "AR" in c: return "Climatização"
         if "ILUM" in c or "LÂMP" in c: return "Iluminação"
         
-        # --- CORREÇÃO AQUI ---
-        # Adicionados termos genéricos para garantir que "Informática" seja capturada
+        # Informática (Ajuste anterior)
         if "COMP" in c or "MONIT" in c or "INFORM" in c or "PC" in c or "TI" in c or "NOTE" in c: 
             return "Informática"
         
-        if "ELETRO" in c or "GELADEIRA" in c or "MICRO" in c: return "Eletrodomésticos"
+        # --- CORREÇÃO AQUI (ELETRODOMÉSTICOS) ---
+        # Lista expandida para capturar tudo
+        termos_eletro = [
+            "ELETRO", "GELADEIRA", "MICRO", "REFRIGERADOR", 
+            "FREEZER", "FRIGOBAR", "CAFETEIRA", "BEBEDOURO", 
+            "FOGÃO", "FOGAO", "FORNO", "JARRA", "CHALEIRA", "LAVADORA"
+        ]
+        if any(termo in c for termo in termos_eletro):
+            return "Eletrodomésticos"
+
         if "ELEV" in c: return "Elevadores"
         if "BOMB" in c: return "Bombas"
         return "Outros"
@@ -214,7 +222,7 @@ if not df_raw.empty:
     ])
 
     # ---------------------------------------------------
-    # TAB 1 — DIMENSIONAMENTO (BLOCO 1)
+    # TAB 1 — DIMENSIONAMENTO
     # ---------------------------------------------------
     with tab1:
         st.subheader("📉 Dimensionamento de Demanda (kW)")
@@ -318,22 +326,17 @@ if not df_raw.empty:
 
 
     # ---------------------------------------------------
-    # TAB 3 — NOVA ABA 💡 EFICIÊNCIA
+    # TAB 3 — EFICIÊNCIA
     # ---------------------------------------------------
     with tab_eff:
         st.subheader("💡 Eficiência Energética — Potencial de Redução (%) e Economia")
 
-        st.markdown("""
-Abaixo você encontra um diagnóstico detalhado de **onde estão os maiores desperdícios**,  
-quanto pode ser economizado **por categoria**, e qual seria a **economia total mensal**.
-""")
-
         # MODELO DE EFICIÊNCIA REAL
         eficiencia_params = {
-            "Iluminação": 0.60,         # 60% de redução com LED
-            "Climatização": 0.35,       # 35% com inverter
-            "Informática": 0.40,        # 40% PCs eficientes (CORRIGIDO: Agora funciona)
-            "Eletrodomésticos": 0.20,   # 20% novos
+            "Iluminação": 0.60,
+            "Climatização": 0.35,
+            "Informática": 0.40,
+            "Eletrodomésticos": 0.20,
             "Elevadores": 0.05,
             "Bombas": 0.15,
             "Outros": 0.10
@@ -406,32 +409,22 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         # PARÂMETROS DE INVESTIMENTO
         with col_l:
             st.markdown("### 🎯 Parâmetros do Projeto")
-
-            investimento = st.number_input(
-                "Orçamento disponível (R$):",
-                value=50000.0,
-                step=5000.0
-            )
-
-            st.markdown("#### 🔧 Custos unitários de modernização")
+            investimento = st.number_input("Orçamento disponível (R$):", value=50000.0, step=5000.0)
+            
+            st.markdown("#### 🔧 Custos unitários")
             custo_led = st.number_input("Troca p/ LED", value=25.0)
             custo_ar = st.number_input("Ar Inverter (R$)", value=3500.0)
             custo_pc = st.number_input("Mini PC (R$)", value=2800.0)
+            
+            st.info("Prioridade: 1) Iluminação, 2) Clima, 3) TI")
 
-            st.info("""
-            📌 **Ordem de prioridade automática:** 1) Iluminação → 2) Climatização → 3) Informática  
-            """)
-
-        # ALOCAÇÃO OTIMIZADA DA VERBA
+        # ALOCAÇÃO
         with col_r:
-            st.markdown("### 🔁 Distribuição automática da verba")
+            st.markdown("### 🔁 Distribuição da verba")
 
-            # Quantidades existentes no inventário (AGORA INFORMÁTICA ESTÁ CORRETA)
             qtd_luz = df_raw[df_raw["Categoria_Macro"] == "Iluminação"]["Quant"].sum()
             qtd_ar = df_raw[df_raw["Categoria_Macro"] == "Climatização"]["Quant"].sum()
             qtd_pc = df_raw[df_raw["Categoria_Macro"] == "Informática"]["Quant"].sum()
-
-            # --- Aplicação automática da verba ---
 
             # 1) LED
             max_inv_luz = qtd_luz * custo_led
@@ -439,35 +432,27 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
             sobra_1 = investimento - inv_luz
             luz_trocadas = int(inv_luz / custo_led)
 
-            # 2) Ar inverter
+            # 2) Ar
             max_inv_ar = qtd_ar * custo_ar
             inv_ar = min(sobra_1, max_inv_ar)
             sobra_2 = sobra_1 - inv_ar
             ar_trocados = int(inv_ar / custo_ar)
 
-            # 3) Mini PCs
+            # 3) PC
             max_inv_pc = qtd_pc * custo_pc
             inv_pc = min(sobra_2, max_inv_pc)
             pc_trocados = int(inv_pc / custo_pc)
 
-            # RENDERIZAÇÃO DOS RESULTADOS
             c1, c2, c3 = st.columns(3)
-            c1.metric("Lâmpadas instaladas", f"{luz_trocadas} un.")
-            c2.metric("Ar-condicionados novos", f"{ar_trocados} un.")
-            c3.metric("Mini PCs adquiridos", f"{pc_trocados} un.")
+            c1.metric("LEDs", f"{luz_trocadas} un.")
+            c2.metric("Ar Inverter", f"{ar_trocados} un.")
+            c3.metric("Mini PCs", f"{pc_trocados} un.")
 
         st.divider()
 
-        # ECONOMIA ESTIMADA (REAL)
-        st.markdown("### 📉 Economia Mensal Estimada")
-
-        # Iluminação — economia de 60%
+        # ECONOMIA
         eco_luz = luz_trocadas * (0.030 * horas_luz * dias_mes * tarifa_kwh * 0.60)
-
-        # Ar Inverter — diferença média 1.4 kW -> 0.9 kW (aplica sazonalidade do ar)
         eco_ar = ar_trocados * (1.4 * horas_ar * dias_mes * tarifa_kwh * 0.35 * (fator_sazonal_clima if 'Verão' in periodo else 1.0))
-
-        # PCs — economia típica de 115W (Agora usando horas_pc corretamente)
         eco_pc = pc_trocados * (0.115 * horas_pc * dias_mes * tarifa_kwh)
 
         economia_total = eco_luz + eco_ar + eco_pc
@@ -482,58 +467,38 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         elif payback < 36:
             st.info("Boa viabilidade — retorno moderado.")
         else:
-            st.warning("Retorno longo — investimento pouco atrativo.")
+            st.warning("Retorno longo.")
 
 
     # ---------------------------------------------------
-    # TAB 5 — DETALHES ANDAR / SALA
+    # TAB 5 — DETALHES
     # ---------------------------------------------------
     with tab4:
-        st.subheader("🏢 Análise detalhada — Andares e Salas")
-
+        st.subheader("🏢 Análise detalhada")
         col_a, col_s = st.columns(2)
 
-        # ANÁLISE POR ANDAR
         with col_a:
-            st.markdown("### 🏬 Andares")
+            st.markdown("### 🏬 Por Andar")
             lista_andares = sorted(df_raw['num_andar'].unique())
             andar_sel = st.selectbox("Selecione o andar:", lista_andares)
-
             df_andar = df_raw[df_raw['num_andar'] == andar_sel]
-
             custo_andar = df_andar["Custo_Consumo_R$"].sum()
-            st.metric(f"Custo Total — Andar {andar_sel}", f"R$ {custo_andar:,.2f}")
+            st.metric(f"Total Andar {andar_sel}", f"R$ {custo_andar:,.2f}")
+            
+            df_andar_salas = df_andar.groupby("Id_sala")["Custo_Consumo_R$"].sum().reset_index().sort_values("Custo_Consumo_R$", ascending=False)
+            st.dataframe(df_andar_salas, use_container_width=True, hide_index=True)
 
-            df_andar_salas = (
-                df_andar.groupby("Id_sala")["Custo_Consumo_R$"]
-                .sum()
-                .reset_index()
-                .sort_values("Custo_Consumo_R$", ascending=False)
-            )
-
-            st.dataframe(
-                df_andar_salas,
-                use_container_width=True,
-                hide_index=True
-            )
-
-        # ANÁLISE POR SALA
         with col_s:
-            st.markdown("### 🚪 Salas")
+            st.markdown("### 🚪 Por Sala")
             lista_salas = sorted(df_raw['Id_sala'].unique())
             sala_sel = st.selectbox("Selecione a sala:", lista_salas)
-
             df_sala = df_raw[df_raw['Id_sala'] == sala_sel]
-
             custo_sala = df_sala["Custo_Consumo_R$"].sum()
-            st.metric(f"Custo Total — Sala {sala_sel}", f"R$ {custo_sala:,.2f}")
-
+            st.metric(f"Total Sala {sala_sel}", f"R$ {custo_sala:,.2f}")
+            
             st.dataframe(
-                df_sala[
-                    ["des_nome_equipamento", "Quant", "Potencia_Instalada_kW", "Custo_Consumo_R$"]
-                ].sort_values("Custo_Consumo_R$", ascending=False),
-                use_container_width=True,
-                hide_index=True
+                df_sala[["des_nome_equipamento", "Quant", "Potencia_Instalada_kW", "Custo_Consumo_R$"]].sort_values("Custo_Consumo_R$", ascending=False),
+                use_container_width=True, hide_index=True
             )
 
 else:
