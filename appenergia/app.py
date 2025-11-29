@@ -9,8 +9,9 @@ st.set_page_config(page_title="Dashboard de Energia (Dimensionamento)", layout="
 
 st.title("⚡ Gestão de Energia: Dimensionamento de Demanda")
 st.markdown("""
-Este painel calcula a **Demanda de Pico Estimada** com base na carga instalada e fatores de simultaneidade. 
-O custo financeiro é projetado considerando o ajuste ideal do contrato para este pico.
+Este painel simula os dois componentes da fatura de energia do Grupo A:
+1. **Demanda (Fixo):** O custo da infraestrutura necessária (potência).
+2. **Consumo (Variável):** O custo da energia efetivamente utilizada.
 """)
 
 # --- 1. CARREGAMENTO E TRATAMENTO DE DADOS ---
@@ -94,8 +95,8 @@ if not df_raw.empty:
         st.header("⚙️ Parâmetros")
         
         st.subheader("💰 Tarifas Locais")
-        tarifa_kwh = st.number_input("Tarifa Consumo (R$/kWh)", value=0.65)
-        tarifa_kw_demanda = st.number_input("Tarifa Demanda (R$/kW)", value=40.00, help="Valor cobrado por kW de potência disponível.")
+        tarifa_kwh = st.number_input("Tarifa Consumo (R$/kWh)", value=0.65, help="Preço da energia gasta")
+        tarifa_kw_demanda = st.number_input("Tarifa Demanda (R$/kW)", value=40.00, help="Preço fixo da potência disponibilizada (fio)")
         
         st.divider()
         st.subheader("🕒 Salas Críticas (24h)")
@@ -160,6 +161,12 @@ if not df_raw.empty:
     total_instalado_kw = df_raw['Potencia_Instalada_kW'].sum()
     total_demanda_pico_kw = df_raw['Demanda_Estimada_kW'].sum()
     
+    # Custo Fixo de Demanda
+    custo_demanda_fixo = total_demanda_pico_kw * tarifa_kw_demanda
+    
+    # Custo Variável de Consumo
+    custo_total_consumo = df_raw['Custo_Consumo_R$'].sum()
+    
     # --- 4. VISUALIZAÇÃO ---
     
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -169,48 +176,43 @@ if not df_raw.empty:
         "🏫 Detalhe Salas"
     ])
 
-    # --- ABA 1: DIMENSIONAMENTO & OCUPAÇÃO ---
+    # --- ABA 1: DIMENSIONAMENTO (CUSTO FIXO) ---
     with tab1:
-        st.subheader("Análise de Pico e Dimensionamento de Contrato")
+        st.subheader("Análise de Demanda (Custo Fixo de Disponibilidade)")
         
-        with st.expander("📚 Como interpretamos o Pico?", expanded=False):
+        with st.expander("📚 Por que esse valor é diferente do Consumo?", expanded=False):
             st.markdown(r"""
-            1.  **Pico Elétrico:** Baseado nos equipamentos e fatores de simultaneidade (Ex: Ar Condicionado = 0.85).
-            2.  **Pico de Pessoas:** A quantidade de pessoas impacta diretamente na carga térmica (ar condicionado) e uso de equipamentos.
+            **Este painel calcula apenas o 'Aluguel do Fio' (Demanda Contratada).**
+            
+            * Imagine um plano de internet: Você paga um valor fixo pela velocidade (ex: 500 Mega).
+            * Isso é a **Demanda (kW)**. Você paga para ter essa capacidade disponível, usando ou não.
+            * O valor abaixo é o custo sugerido de contrato para suportar seus equipamentos.
             """)
 
         # 1. KPIs ELÉTRICOS
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Potência Instalada (Total)", f"{total_instalado_kw:,.1f} kW", help="Carga total se tudo ligar junto")
+        col1.metric("Potência Instalada (Total)", f"{total_instalado_kw:,.1f} kW")
+        col2.metric("Pico Estimado (Contrato Ideal)", f"{total_demanda_pico_kw:,.1f} kW")
         
-        custo_demanda = total_demanda_pico_kw * tarifa_kw_demanda
-        col2.metric("Pico Estimado (Contrato Ideal)", f"{total_demanda_pico_kw:,.1f} kW", help="Demanda máxima provável")
-        col3.metric("Custo Mensal de Demanda", f"R$ {custo_demanda:,.2f}")
+        # MUDANÇA DE NOME PARA EVITAR CONFUSÃO
+        col3.metric("Custo Fixo (Demanda)", f"R$ {custo_demanda_fixo:,.2f}", help="Valor fixo mensal pago pela disponibilidade (kW x Tarifa Demanda)")
         
-        # 2. DADOS DE OCUPAÇÃO
         if not df_ocupacao.empty:
             pico_pessoas = df_ocupacao['Ocupacao_Acumulada'].max()
             if pd.isna(pico_pessoas): pico_pessoas = 0
-            col4.metric("Pico de Ocupação Real", f"{int(pico_pessoas)} Pessoas", help="Máximo registrado no período")
+            col4.metric("Pico de Ocupação Real", f"{int(pico_pessoas)} Pessoas")
         else:
             col4.metric("Pico de Ocupação", "N/A")
 
         st.divider()
 
-        # GRÁFICO DE FLUXO DE PESSOAS
         if not df_ocupacao.empty:
             st.markdown("#### 👥 Comportamento da Ocupação")
-            fig_oc = px.line(
-                df_ocupacao, 
-                x='DataHora', 
-                y='Ocupacao_Acumulada', 
-                title='Fluxo de Pessoas (Acumulado por Dia)'
-            )
+            fig_oc = px.line(df_ocupacao, x='DataHora', y='Ocupacao_Acumulada', title='Fluxo de Pessoas (Acumulado por Dia)')
             st.plotly_chart(fig_oc, use_container_width=True)
         
         st.divider()
 
-        # 3. DETALHES TÉCNICOS
         c_gauge, c_tbl = st.columns([1, 1.5])
         
         with c_gauge:
@@ -232,16 +234,15 @@ if not df_raw.empty:
                 }
             ))
             st.plotly_chart(fig_gauge, use_container_width=True)
-            
             kVA_calc = total_demanda_pico_kw / 0.92
             st.info(f"Transformador Recomendado: **{kVA_calc:.0f} kVA** (FP 0.92).")
 
         with c_tbl:
-            st.markdown("#### Composição do Pico por Categoria e Custo")
+            st.markdown("#### Composição do Custo de Demanda")
             df_demanda_cat = df_raw.groupby('Categoria_Macro')[['Potencia_Instalada_kW', 'Demanda_Estimada_kW']].sum().reset_index()
             df_demanda_cat['Fator Demanda'] = df_demanda_cat['Categoria_Macro'].map(fatores_demanda)
             
-            # --- CÁLCULO DO CUSTO ESTIMADO ---
+            # Custo Estimado POR CATEGORIA DE DEMANDA
             df_demanda_cat['Custo Demanda (R$)'] = df_demanda_cat['Demanda_Estimada_kW'] * tarifa_kw_demanda
             
             df_demanda_cat = df_demanda_cat.sort_values('Demanda_Estimada_kW', ascending=False)
@@ -253,20 +254,26 @@ if not df_raw.empty:
                     "Fator Demanda": "{:.2f}",
                     "Custo Demanda (R$)": "R$ {:.2f}"
                 }), 
-                use_container_width=True,
-                hide_index=True
+                use_container_width=True, hide_index=True
             )
 
-    # --- ABA 2: CONSUMO (kWh) ---
+    # --- ABA 2: CONSUMO (CUSTO VARIÁVEL) ---
     with tab2:
-        st.subheader("Consumo de Energia (Fatura Variável)")
+        st.subheader("Consumo de Energia (Custo Variável de Uso)")
         
-        custo_total_consumo = df_raw['Custo_Consumo_R$'].sum()
         consumo_total_kwh = df_raw['Consumo_Mensal_kWh'].sum()
         
-        k1, k2 = st.columns(2)
+        # SOMA DOS DOIS CUSTOS PARA VISÃO GERAL
+        fatura_total_estimada = custo_demanda_fixo + custo_total_consumo
+        
+        k1, k2, k3 = st.columns(3)
         k1.metric("Consumo Mensal Total", f"{consumo_total_kwh:,.0f} kWh")
-        k2.metric("Custo do Consumo", f"R$ {custo_total_consumo:,.2f}", help="Custo apenas da energia consumida")
+        k2.metric("Custo Variável (Energia)", f"R$ {custo_total_consumo:,.2f}", help="Valor pago pelo que foi consumido (kWh)")
+        
+        # NOVO KPI SOMANDO TUDO
+        k3.metric("Fatura Total Estimada", f"R$ {fatura_total_estimada:,.2f}", 
+                  delta="Demanda (Fixo) + Consumo (Variável)", delta_color="off",
+                  help="Soma do custo fixo da Aba 1 com o custo variável desta aba.")
         
         st.divider()
         c_bar, c_pie = st.columns([2, 1])
@@ -279,7 +286,7 @@ if not df_raw.empty:
             st.plotly_chart(fig_bar, use_container_width=True)
             
         with c_pie:
-            st.markdown("**Representatividade no Custo**")
+            st.markdown("**Representatividade no Custo Variável**")
             fig_pie = px.pie(df_raw, values='Custo_Consumo_R$', names='Categoria_Macro', hole=0.4)
             st.plotly_chart(fig_pie, use_container_width=True)
 
@@ -288,7 +295,6 @@ if not df_raw.empty:
         st.subheader("Estudo de Viabilidade (Retrofit)")
         
         col_input, col_result = st.columns([1, 2])
-        
         with col_input:
             st.markdown("##### Parâmetros do Projeto")
             investimento = st.number_input("Verba Disponível (R$)", 50000.0, step=5000.0)
@@ -312,15 +318,12 @@ if not df_raw.empty:
     # --- ABA 4: DETALHE SALAS ---
     with tab4:
         st.subheader("Detalhamento por Nível e Ambiente")
-        
         col_andar, col_sala = st.columns(2)
         
-        # COLUNA 1: ANDARES
         with col_andar:
             st.markdown("### 🏢 Por Andar")
             andares = sorted(df_raw['num_andar'].unique().astype(str))
             sel_andar = st.selectbox("Selecione o Andar:", andares)
-            
             if sel_andar:
                 df_a = df_raw[df_raw['num_andar'] == sel_andar]
                 custo_andar = df_a['Custo_Consumo_R$'].sum()
@@ -329,12 +332,10 @@ if not df_raw.empty:
                 df_a_agrupado = df_a.groupby('Id_sala')[['Custo_Consumo_R$']].sum().reset_index().sort_values('Custo_Consumo_R$', ascending=False)
                 st.dataframe(df_a_agrupado.style.format({"Custo_Consumo_R$": "R$ {:.2f}"}), use_container_width=True, hide_index=True)
 
-        # COLUNA 2: SALAS INDIVIDUAIS
         with col_sala:
             st.markdown("### 🚪 Por Sala")
             salas = sorted(df_raw['Id_sala'].unique().astype(str))
             sel_sala = st.selectbox("Selecione a Sala:", salas)
-            
             if sel_sala:
                 df_s = df_raw[df_raw['Id_sala'] == sel_sala]
                 custo_sala = df_s['Custo_Consumo_R$'].sum()
