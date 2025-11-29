@@ -254,7 +254,7 @@ if not df_raw.empty:
         # ============================================================
         # 🔍 ADIÇÃO: Comparação entre Pico Estimado (kW) e Consumo Real (kWh)
         # ============================================================
-        st.markdown("### 🔎 Comparação Automática: Uso Real vs Capacidade Estimada")
+        st.markdown("### 🔎 Comparação: Uso Real vs Capacidade Estimada")
 
         # Potência média equivalente (convertendo kWh -> kW)
         potencia_media_kw = consumo_total_kwh / 720   # 30 dias * 24 h = 720 h
@@ -378,3 +378,4 @@ if not df_raw.empty:
 
 else:
     st.info("Aguardando dados... Se o erro persistir, verifique a conexão com o GitHub.")
+
