@@ -18,8 +18,8 @@ Ele integra análise de consumo, viabilidade financeira e monitoramento de deman
 
 # URLs Diretas (RAW Content)
 DATA_URL_INVENTARIO = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/main/Planilha%20Unificada(Equipamentos%20Consumo).csv"
-# Link ajustado para o arquivo de Horários (Entradas e Saídas)
-DATA_URL_OCUPACAO = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/main/Hor%C3%A1rios%20Presencialidade%20T%C3%A9cnicos%20Pr%C3%A9dio%20Reitoria-%2001set-05set.xlsx%20-%20Entradas%20e%20Sa%C3%ADdas.csv"
+# Link ajustado para o arquivo Excel (.xlsx) conforme confirmado
+DATA_URL_OCUPACAO = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/main/Hor%C3%A1rios.xlsx"
 
 # Função auxiliar para normalizar texto (remove acentos e caixa alta)
 def normalizar_texto(texto):
@@ -56,10 +56,27 @@ def load_data():
         df_inv['Potencia_Real_W'] = df_inv.apply(converter_watts, axis=1)
         df_inv['Potencia_Total_Item_W'] = df_inv['Potencia_Real_W'] * df_inv['Quant']
         
-        # --- B. CARGA OCUPAÇÃO (ROBUSTA) ---
+        # --- B. CARGA OCUPAÇÃO (EXCEL) ---
         try:
-            # Tenta ler como CSV (já que o link é .csv)
-            df_oc = pd.read_csv(DATA_URL_OCUPACAO, encoding='cp1252', on_bad_lines='skip')
+            # Carrega o arquivo Excel
+            # IMPORTANTE: Tenta ler direto como Excel usando a engine openpyxl
+            xls = pd.ExcelFile(DATA_URL_OCUPACAO, engine='openpyxl')
+            
+            # Procura aba correta normalizando nomes das colunas na primeira linha
+            nome_aba_dados = None
+            for aba in xls.sheet_names:
+                df_temp = pd.read_excel(xls, sheet_name=aba, nrows=5)
+                cols_norm = [normalizar_texto(c) for c in df_temp.columns]
+                # Verifica se as colunas essenciais existem
+                if any(x in cols_norm for x in ['ENTRADASAIDA', 'DATAHORA', 'HORARIO', 'TIPO']):
+                    nome_aba_dados = aba
+                    break
+            
+            # Se não achou por nome de coluna, usa a primeira aba
+            if not nome_aba_dados:
+                nome_aba_dados = xls.sheet_names[0]
+
+            df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados)
             
             # Limpeza de colunas duplicadas
             df_oc = df_oc.loc[:, ~df_oc.columns.duplicated()]
@@ -76,7 +93,7 @@ def load_data():
                 df_oc['DataHora'] = pd.to_datetime(df_oc['DataHora'], errors='coerce')
                 df_oc = df_oc.dropna(subset=['DataHora']).sort_values('DataHora')
                 
-                # *** CORREÇÃO IMPORTANTE: Reset Index para evitar "duplicate keys" ***
+                # *** Reset Index para evitar erros de agrupamento ***
                 df_oc = df_oc.reset_index(drop=True)
                 
                 # Tratamento de Movimento (E/S -> 1/-1)
@@ -104,7 +121,7 @@ def load_data():
                 df_oc = pd.DataFrame() # Sem data, sem gráfico
             
         except Exception as e:
-            # st.error(f"Erro Excel: {e}") # Descomentar para debug
+            # st.error(f"Erro Excel: {e}") # Descomentar para debug se necessário
             df_oc = pd.DataFrame()
 
         return df_inv, df_oc
@@ -119,7 +136,7 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS (COMPLETO) ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 4.0 (Final Integrada)")
+        st.caption("Versão: 4.1 (Horários.xlsx)")
         
         # Sliders detalhados
         with st.expander("Horas de Uso (Padrão)", expanded=True):
@@ -208,7 +225,7 @@ if not df_raw.empty:
         
         demanda_estimada_pico = potencia_salas_24h_kw + carga_base_tecnica + carga_variavel
     else:
-        # Fallback sem arquivo de ocupação
+        # Fallback sem arquivo de ocupação: Mantém a estimativa, mas avisa
         pico_pessoas = 0
         data_pico = "Sem dados"
         # Assume Carga 24h + 50% do resto
@@ -261,7 +278,7 @@ if not df_raw.empty:
 
         fig_dem = go.Figure()
         fig_dem.add_trace(go.Bar(x=['kW'], y=[demanda_contratada], name='Contratada', marker_color='green'))
-        fig_dem.add_trace(go.Bar(x=['kW'], y=[potencia_salas_24h_kw], name='Carga Base (24h)', marker_color='blue'))
+        fig_dem.add_trace(go.Bar(x=['kW'], y=[potencia_salas_24h_kw], name='Carga Base (Salas 24h)', marker_color='blue'))
         fig_dem.add_trace(go.Bar(x=['kW'], y=[demanda_estimada_pico - potencia_salas_24h_kw], name='Carga Variável (Uso)', marker_color='orange'))
         fig_dem.update_layout(barmode='stack', title="Composição da Demanda Estimada")
         st.plotly_chart(fig_dem, use_container_width=True)
