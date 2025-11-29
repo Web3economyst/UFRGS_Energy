@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+import unicodedata
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Dashboard de Energia UFRGS", layout="wide", page_icon="⚡")
@@ -15,10 +16,15 @@ Ele integra análise de consumo, viabilidade financeira e monitoramento de deman
 
 # --- 1. CARREGAMENTO E TRATAMENTO DE DADOS ---
 
-# URL RAW do arquivo no GitHub (Link direto para o dado bruto)
+# URLs Diretas (RAW Content)
 DATA_URL_INVENTARIO = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/main/Planilha%20Unificada(Equipamentos%20Consumo).csv"
-# Link ajustado para o arquivo Horários.xlsx conforme sua indicação
-DATA_URL_OCUPACAO = "https://github.com/Web3economyst/UFRGS_Energy/raw/main/Hor%C3%A1rios.xlsx"
+# Link ajustado para o arquivo de Horários (Entradas e Saídas)
+DATA_URL_OCUPACAO = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/main/Hor%C3%A1rios%20Presencialidade%20T%C3%A9cnicos%20Pr%C3%A9dio%20Reitoria-%2001set-05set.xlsx%20-%20Entradas%20e%20Sa%C3%ADdas.csv"
+
+# Função auxiliar para normalizar texto (remove acentos e caixa alta)
+def normalizar_texto(texto):
+    if not isinstance(texto, str): return str(texto)
+    return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn').upper().strip()
 
 @st.cache_data
 def load_data():
@@ -29,7 +35,7 @@ def load_data():
         df_inv['Quant'] = pd.to_numeric(df_inv['Quant'], errors='coerce').fillna(1)
         df_inv['num_potencia'] = pd.to_numeric(df_inv['num_potencia'], errors='coerce').fillna(0)
 
-        # Tratamento de Strings
+        # Tratamento de Strings (Limpeza)
         if 'num_andar' in df_inv.columns:
             df_inv['num_andar'] = df_inv['num_andar'].astype(str).str.replace(r'\.0$', '', regex=True).replace(['nan', 'NaN', ''], 'Não Identificado')
         else:
@@ -50,64 +56,55 @@ def load_data():
         df_inv['Potencia_Real_W'] = df_inv.apply(converter_watts, axis=1)
         df_inv['Potencia_Total_Item_W'] = df_inv['Potencia_Real_W'] * df_inv['Quant']
         
-        # --- B. CARGA OCUPAÇÃO (EXCEL) ---
+        # --- B. CARGA OCUPAÇÃO (ROBUSTA) ---
         try:
-            xls = pd.ExcelFile(DATA_URL_OCUPACAO)
+            # Tenta ler como CSV (já que o link é .csv)
+            df_oc = pd.read_csv(DATA_URL_OCUPACAO, encoding='cp1252', on_bad_lines='skip')
             
-            # Procura aba que contenha as colunas especificadas (DataHora, EntradaSaida)
-            nome_aba_dados = None
-            for aba in xls.sheet_names:
-                df_temp = pd.read_excel(xls, sheet_name=aba, nrows=5)
-                cols_limpas = [str(c).strip() for c in df_temp.columns]
-                # Verifica se as colunas exatas estão presentes
-                if 'DataHora' in cols_limpas and 'EntradaSaida' in cols_limpas:
-                    nome_aba_dados = aba
-                    break
-            
-            # Se não achar pelos nomes exatos, tenta a primeira aba
-            if not nome_aba_dados:
-                nome_aba_dados = xls.sheet_names[0]
-
-            df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados)
-            
-            # Limpeza de colunas duplicadas e espaços
+            # Limpeza de colunas duplicadas
             df_oc = df_oc.loc[:, ~df_oc.columns.duplicated()]
-            df_oc.columns = df_oc.columns.astype(str).str.strip()
             
-            # Verifica colunas essenciais
-            if 'DataHora' in df_oc.columns and 'EntradaSaida' in df_oc.columns:
+            # Mapeamento de colunas flexível (Normalizado)
+            col_data = next((c for c in df_oc.columns if normalizar_texto(c) in ['DATAHORA', 'HORARIO', 'DATA', 'DATA_HORA']), None)
+            col_mov = next((c for c in df_oc.columns if normalizar_texto(c) in ['ENTRADASAIDA', 'TIPO', 'MOVIMENTO', 'ENTRADA_SAIDA']), None)
+
+            # Se achou Data, processa
+            if col_data:
+                df_oc = df_oc.rename(columns={col_data: 'DataHora'})
+                if col_mov: df_oc = df_oc.rename(columns={col_mov: 'EntradaSaida'})
                 
                 df_oc['DataHora'] = pd.to_datetime(df_oc['DataHora'], errors='coerce')
-                # Remove linhas sem data e ordena
                 df_oc = df_oc.dropna(subset=['DataHora']).sort_values('DataHora')
-                # Reseta índice para evitar erros de duplicidade
+                
+                # *** CORREÇÃO IMPORTANTE: Reset Index para evitar "duplicate keys" ***
                 df_oc = df_oc.reset_index(drop=True)
                 
-                # Mapeia Movimento (E/S)
-                # Pega a primeira letra, converte para maiúscula e mapeia
-                df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).str.upper().str.strip().str[0].map({'E': 1, 'S': -1}).fillna(0)
-                
-                # Cálculo de saldo acumulado por dia (Reseta o contador a cada dia)
+                # Tratamento de Movimento (E/S -> 1/-1)
+                if 'EntradaSaida' in df_oc.columns:
+                    # Pega a primeira letra (E ou S), normaliza e mapeia
+                    df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).apply(lambda x: normalizar_texto(x)[0] if len(x)>0 else '').map({'E': 1, 'S': -1}).fillna(0)
+                else:
+                    df_oc['Variacao'] = 0 
+
+                # Cálculo de saldo diário (Match por Data)
                 df_oc['Data_Dia'] = df_oc['DataHora'].dt.date
                 
                 def calcular_saldo_diario(grupo):
                     grupo = grupo.sort_values('DataHora')
                     grupo['Ocupacao_Dia'] = grupo['Variacao'].cumsum()
-                    # Ajuste para não ter ocupação negativa (assume erro de registro se < 0)
+                    # Se começar negativo no dia, ajusta a base para zero
                     min_val = grupo['Ocupacao_Dia'].min()
-                    if min_val < 0:
-                        grupo['Ocupacao_Dia'] += abs(min_val)
+                    if min_val < 0: grupo['Ocupacao_Dia'] += abs(min_val)
                     return grupo
 
-                df_oc = df_oc.groupby('Data_Dia', group_keys=False).apply(calcular_saldo_diario)
-                df_oc['Ocupacao_Acumulada'] = df_oc['Ocupacao_Dia']
-                
+                if not df_oc.empty:
+                    df_oc = df_oc.groupby('Data_Dia', group_keys=False).apply(calcular_saldo_diario)
+                    df_oc['Ocupacao_Acumulada'] = df_oc['Ocupacao_Dia']
             else:
-                st.warning(f"Colunas 'DataHora' e 'EntradaSaida' não encontradas. Colunas lidas: {df_oc.columns.tolist()}")
-                df_oc = pd.DataFrame()
+                df_oc = pd.DataFrame() # Sem data, sem gráfico
             
         except Exception as e:
-            # st.error(f"Erro ao ler Excel: {e}") 
+            # st.error(f"Erro Excel: {e}") # Descomentar para debug
             df_oc = pd.DataFrame()
 
         return df_inv, df_oc
@@ -122,10 +119,10 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS (COMPLETO) ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 3.6 (Horários.xlsx)")
+        st.caption("Versão: 4.0 (Final Integrada)")
         
         # Sliders detalhados
-        with st.expander("Horas de Uso (Perfil Diário)", expanded=True):
+        with st.expander("Horas de Uso (Padrão)", expanded=True):
             horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
             horas_luz = st.slider("Iluminação", 0, 24, 10)
             horas_pc = st.slider("Computadores/TI", 0, 24, 9)
@@ -133,6 +130,16 @@ if not df_raw.empty:
             horas_outros = st.slider("Outros", 0, 24, 6)
             dias_mes = st.number_input("Dias úteis/mês", value=22)
         
+        # --- SELETOR DE SALAS 24H (NOVO) ---
+        st.divider()
+        st.markdown("🕒 **Exceções de Horário (24h)**")
+        lista_salas_unicas = sorted(df_raw['Id_sala'].unique().astype(str))
+        salas_24h = st.multiselect(
+            "Selecione salas que operam 24h (ex: Servidores, Segurança):",
+            options=lista_salas_unicas,
+            help="Equipamentos nestas salas terão o consumo calculado baseando-se em 24h de uso diário."
+        )
+
         st.divider()
         st.markdown("⚡ **Tarifas e Contrato**")
         tarifa_kwh = st.number_input("Tarifa Consumo (R$/kWh)", value=0.65)
@@ -153,15 +160,19 @@ if not df_raw.empty:
 
     df_raw['Categoria_Macro'] = df_raw['des_categoria'].apply(agrupar_categoria)
     
-    # Cálculo de Consumo (kWh)
+    # Cálculo de Consumo (kWh) - COM LÓGICA DE SALAS 24H
     def calc_consumo(row):
-        cat = row['Categoria_Macro']
-        # Mapeamento detalhado
-        if cat == 'Climatização': h = horas_ar
-        elif cat == 'Iluminação': h = horas_luz
-        elif cat == 'Informática': h = horas_pc
-        elif cat == 'Eletrodomésticos': h = horas_eletro
-        else: h = horas_outros
+        # Verifica se a sala está na lista de exceções
+        if str(row['Id_sala']) in salas_24h:
+            h = 24
+        else:
+            cat = row['Categoria_Macro']
+            if cat == 'Climatização': h = horas_ar
+            elif cat == 'Iluminação': h = horas_luz
+            elif cat == 'Informática': h = horas_pc
+            elif cat == 'Eletrodomésticos': h = horas_eletro
+            else: h = horas_outros
+            
         return (row['Potencia_Total_Item_W'] * h * dias_mes) / 1000
 
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(calc_consumo, axis=1)
@@ -170,33 +181,38 @@ if not df_raw.empty:
     # Cálculo de Potência Instalada
     potencia_instalada_total_kw = df_raw['Potencia_Total_Item_W'].sum() / 1000
 
-    # --- 4. CÁLCULO DE DEMANDA DE PICO ---
+    # --- 4. CÁLCULO DE DEMANDA DE PICO (REFINADO) ---
+    # Separa carga das salas 24h (Carga Base Garantida)
+    potencia_salas_24h_kw = df_raw[df_raw['Id_sala'].isin(salas_24h)]['Potencia_Total_Item_W'].sum() / 1000
+    # Potência do restante do prédio
+    potencia_resto_kw = (df_raw['Potencia_Total_Item_W'].sum() / 1000) - potencia_salas_24h_kw
+    
     if not df_ocupacao.empty and 'Ocupacao_Acumulada' in df_ocupacao.columns:
         pico_pessoas = df_ocupacao['Ocupacao_Acumulada'].max()
         if pd.isna(pico_pessoas): pico_pessoas = 0
         
-        # Data do pico
         if len(df_ocupacao) > 0:
             idx_max = df_ocupacao['Ocupacao_Acumulada'].idxmax()
             data_pico = df_ocupacao.loc[idx_max, 'DataHora']
         else:
             data_pico = "N/A"
         
-        # Estimativa de Simultaneidade
+        # Fator de Simultaneidade para o resto do prédio
         total_pcs = df_raw[df_raw['Categoria_Macro'] == 'Informática']['Quant'].sum()
-        capacidade_estimada = total_pcs if total_pcs > pico_pessoas else pico_pessoas * 1.2
-        if capacidade_estimada == 0: capacidade_estimada = 1
-        
+        capacidade_estimada = max(total_pcs, pico_pessoas * 1.1, 1)
         fator_simultaneidade = (pico_pessoas / capacidade_estimada)
         
-        # Demanda Estimada (Carga Base + Variável)
-        carga_base = potencia_instalada_total_kw * 0.20 # 20% sempre ligado (geladeiras, servidores, stand-by)
-        carga_variavel = potencia_instalada_total_kw * 0.80
-        demanda_estimada_pico = carga_base + (carga_variavel * fator_simultaneidade)
+        # Demanda = Carga 24h (100%) + Carga Resto (Standby 15% + Uso Variável)
+        carga_base_tecnica = potencia_resto_kw * 0.15 # Standby de equipamentos não-24h
+        carga_variavel = potencia_resto_kw * 0.85 * fator_simultaneidade
+        
+        demanda_estimada_pico = potencia_salas_24h_kw + carga_base_tecnica + carga_variavel
     else:
+        # Fallback sem arquivo de ocupação
         pico_pessoas = 0
         data_pico = "Sem dados"
-        demanda_estimada_pico = potencia_instalada_total_kw * 0.6 
+        # Assume Carga 24h + 50% do resto
+        demanda_estimada_pico = potencia_salas_24h_kw + (potencia_resto_kw * 0.5)
 
     # --- 5. CÁLCULO DE ECONOMIA (PROJEÇÃO) ---
     fator_economia = {
@@ -225,7 +241,7 @@ if not df_raw.empty:
         st.subheader("Análise de Demanda de Potência (kW)")
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         kpi1.metric("Pico de Ocupação", f"{int(pico_pessoas)} Pessoas", help=f"Registrado em: {data_pico}")
-        kpi2.metric("Potência Instalada", f"{potencia_instalada_total_kw:,.0f} kW", help="Total se tudo ligar ao mesmo tempo")
+        kpi2.metric("Potência Instalada", f"{(potencia_resto_kw + potencia_salas_24h_kw):,.0f} kW", help="Total se tudo ligar ao mesmo tempo")
         kpi3.metric("Demanda Estimada", f"{demanda_estimada_pico:,.0f} kW", delta=f"{(demanda_estimada_pico/demanda_contratada)*100:.0f}% do Contrato", delta_color="inverse")
         
         custo_demanda = demanda_contratada * tarifa_kw_demanda
@@ -241,12 +257,13 @@ if not df_raw.empty:
                 fig_oc.add_annotation(x=data_pico, y=pico_pessoas, text=f"Pico: {int(pico_pessoas)}", showarrow=True, arrowhead=1)
             st.plotly_chart(fig_oc, use_container_width=True)
         else:
-            st.info("Dados de ocupação não disponíveis. Verifique o link e o conteúdo do arquivo 'Horários.xlsx'.")
+            st.info("Dados de ocupação não disponíveis. O cálculo de demanda está usando uma estimativa baseada na carga instalada.")
 
         fig_dem = go.Figure()
-        fig_dem.add_trace(go.Bar(x=['Demanda'], y=[demanda_contratada], name='Contratada', marker_color='green'))
-        fig_dem.add_trace(go.Bar(x=['Demanda'], y=[demanda_estimada_pico], name='Pico Estimado', marker_color='orange'))
-        fig_dem.add_trace(go.Bar(x=['Demanda'], y=[potencia_instalada_total_kw], name='Total Instalado', marker_color='gray', visible='legendonly'))
+        fig_dem.add_trace(go.Bar(x=['kW'], y=[demanda_contratada], name='Contratada', marker_color='green'))
+        fig_dem.add_trace(go.Bar(x=['kW'], y=[potencia_salas_24h_kw], name='Carga Base (24h)', marker_color='blue'))
+        fig_dem.add_trace(go.Bar(x=['kW'], y=[demanda_estimada_pico - potencia_salas_24h_kw], name='Carga Variável (Uso)', marker_color='orange'))
+        fig_dem.update_layout(barmode='stack', title="Composição da Demanda Estimada")
         st.plotly_chart(fig_dem, use_container_width=True)
 
     # ABA 2: VISÃO GERAL (Consumo Atual)
