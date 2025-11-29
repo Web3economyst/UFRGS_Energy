@@ -248,7 +248,8 @@ if not df_raw.empty:
                 delta = {'reference': demanda_contratada, 'increasing': {'color': "red"}, 'decreasing': {'color': "green"}},
                 gauge = {
                     'axis': {'range': [None, max_gauge]},
-                    'bar': {'color': "black", 'opacity':0.7},
+                    # CORRIGIDO: Opacity removido e usado RGBA no lugar
+                    'bar': {'color': "rgba(0,0,0,0.7)"}, 
                     'steps': [
                         {'range': [0, demanda_contratada * 0.9], 'color': "#90EE90"}, # Verde
                         {'range': [demanda_contratada * 0.9, demanda_contratada], 'color': "#FFFFE0"}, # Amarelo
