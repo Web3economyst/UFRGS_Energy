@@ -237,16 +237,21 @@ if not df_raw.empty:
             st.info(f"Transformador Recomendado: **{kVA_calc:.0f} kVA** (FP 0.92).")
 
         with c_tbl:
-            st.markdown("#### Composição do Pico por Categoria")
+            st.markdown("#### Composição do Pico por Categoria e Custo")
             df_demanda_cat = df_raw.groupby('Categoria_Macro')[['Potencia_Instalada_kW', 'Demanda_Estimada_kW']].sum().reset_index()
             df_demanda_cat['Fator Demanda'] = df_demanda_cat['Categoria_Macro'].map(fatores_demanda)
+            
+            # --- CÁLCULO DO CUSTO ESTIMADO ---
+            df_demanda_cat['Custo Demanda (R$)'] = df_demanda_cat['Demanda_Estimada_kW'] * tarifa_kw_demanda
+            
             df_demanda_cat = df_demanda_cat.sort_values('Demanda_Estimada_kW', ascending=False)
             
             st.dataframe(
                 df_demanda_cat.style.format({
                     "Potencia_Instalada_kW": "{:.1f} kW",
                     "Demanda_Estimada_kW": "{:.1f} kW",
-                    "Fator Demanda": "{:.2f}"
+                    "Fator Demanda": "{:.2f}",
+                    "Custo Demanda (R$)": "R$ {:.2f}"
                 }), 
                 use_container_width=True,
                 hide_index=True
@@ -304,7 +309,7 @@ if not df_raw.empty:
             elif payback < 36: st.info("⚠️ Viabilidade Média")
             else: st.warning("❌ Payback Longo")
 
-    # --- ABA 4: DETALHE SALAS (NOVO LAYOUT) ---
+    # --- ABA 4: DETALHE SALAS ---
     with tab4:
         st.subheader("Detalhamento por Nível e Ambiente")
         
@@ -319,10 +324,7 @@ if not df_raw.empty:
             if sel_andar:
                 df_a = df_raw[df_raw['num_andar'] == sel_andar]
                 custo_andar = df_a['Custo_Consumo_R$'].sum()
-                
-                # Exibe o Custo TOTAL do Andar
                 st.metric(f"Custo Total - {sel_andar}", f"R$ {custo_andar:,.2f}")
-                
                 st.caption("Salas com maior consumo neste andar:")
                 df_a_agrupado = df_a.groupby('Id_sala')[['Custo_Consumo_R$']].sum().reset_index().sort_values('Custo_Consumo_R$', ascending=False)
                 st.dataframe(df_a_agrupado.style.format({"Custo_Consumo_R$": "R$ {:.2f}"}), use_container_width=True, hide_index=True)
@@ -336,10 +338,7 @@ if not df_raw.empty:
             if sel_sala:
                 df_s = df_raw[df_raw['Id_sala'] == sel_sala]
                 custo_sala = df_s['Custo_Consumo_R$'].sum()
-                
-                # Exibe o Custo TOTAL da Sala
                 st.metric(f"Custo Total - {sel_sala}", f"R$ {custo_sala:,.2f}")
-                
                 st.caption("Equipamentos nesta sala:")
                 st.dataframe(
                     df_s[['des_nome_equipamento', 'Quant', 'Potencia_Instalada_kW', 'Custo_Consumo_R$']].sort_values('Custo_Consumo_R$', ascending=False),
