@@ -130,7 +130,7 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 4.6 (Zoom Gráfico)")
+        st.caption("Versão: 4.7 (Fix NameError)")
         
         with st.expander("Horas de Uso (Padrão)", expanded=True):
             horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
@@ -214,8 +214,15 @@ if not df_raw.empty:
     # Economia
     fator_eco = {'Climatização': 0.4, 'Iluminação': 0.6, 'Informática': 0.3, 'Eletrodomésticos': 0.1, 'Outros': 0.0}
     df_raw['Eco_R$'] = df_raw.apply(lambda x: x['Custo_Mensal_R$'] * fator_eco.get(x['Categoria_Macro'], 0), axis=1)
+    
+    # === CORREÇÃO: DEFINIÇÃO DE VARIÁVEIS GLOBAIS ===
+    # Estas variáveis são necessárias para a aba "Visão Geral" e "Eficiência"
     df_dashboard = df_raw.groupby('Categoria_Macro')[['Custo_Mensal_R$', 'Consumo_Mensal_kWh', 'Eco_R$']].sum().reset_index()
-
+    
+    total_custo = df_dashboard['Custo_Mensal_R$'].sum()
+    eco_total = df_dashboard['Eco_R$'].sum()
+    novo_custo = total_custo - eco_total # Definindo novo_custo aqui para evitar NameError
+    
     # --- 5. VISUALIZAÇÃO ---
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📉 Demanda (Pico)", "📊 Visão Geral", "💡 Eficiência", "📅 Sazonalidade", "🏢 Detalhes", "💰 Viabilidade"])
 
@@ -263,7 +270,7 @@ if not df_raw.empty:
 
     with tab2:
         st.subheader("Diagnóstico Operacional")
-        total_custo = df_dashboard['Custo_Mensal_R$'].sum()
+        # total_custo já foi calculado acima
         c1, c2 = st.columns(2)
         c1.metric("Fatura Consumo", f"R$ {total_custo:,.2f}")
         c2.metric("Consumo Mensal", f"{df_dashboard['Consumo_Mensal_kWh'].sum():,.0f} kWh")
@@ -273,10 +280,11 @@ if not df_raw.empty:
 
     with tab3:
         st.subheader("Potencial de Modernização")
-        eco_total = df_dashboard['Eco_R$'].sum()
+        # eco_total e novo_custo já foram calculados acima
+        
         k1, k2, k3 = st.columns(3)
-        k1.metric("Economia Potencial", f"R$ {eco_total:,.2f}")
-        k2.metric("Novo Custo", f"R$ {(df_dashboard['Custo_Mensal_R$'].sum() - eco_total):,.2f}")
+        k1.metric("Economia Potencial", f"R$ {eco_total:,.2f}", delta="Mensal")
+        k2.metric("Novo Custo", f"R$ {novo_custo:,.2f}", delta_color="inverse")
         k3.metric("CO2 Evitado", f"{(eco_total/tarifa_kwh * fator_co2):,.1f} kg")
         
         fig_eco = go.Figure()
