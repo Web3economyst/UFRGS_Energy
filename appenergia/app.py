@@ -10,7 +10,7 @@ st.set_page_config(page_title="Dashboard de Energia (Dimensionamento)", layout="
 st.title("⚡ Gestão de Energia: Dimensionamento de Demanda")
 st.markdown("""
 Este painel calcula a **Demanda de Pico Estimada** com base na carga instalada e fatores de simultaneidade. 
-O custo financeiro é projetado considerando que o contrato seja ajustado para este pico (Cenário Ideal).
+O custo financeiro é projetado considerando o ajuste ideal do contrato para este pico.
 """)
 
 # --- 1. CARREGAMENTO E TRATAMENTO DE DADOS ---
@@ -26,7 +26,6 @@ def load_data():
         df_inv['Quant'] = pd.to_numeric(df_inv['Quant'], errors='coerce').fillna(1)
         df_inv['num_potencia'] = pd.to_numeric(df_inv['num_potencia'], errors='coerce').fillna(0)
 
-        # Tratamento de Strings
         if 'num_andar' in df_inv.columns:
             df_inv['num_andar'] = df_inv['num_andar'].astype(str).str.replace(r'\.0$', '', regex=True).replace(['nan', 'NaN', ''], 'Não Identificado')
         else:
@@ -37,7 +36,6 @@ def load_data():
         else:
             df_inv['Id_sala'] = 'Não Identificado'
         
-        # Conversão de Potência (BTU -> Watts)
         def converter_watts(row):
             p = row['num_potencia']
             u = str(row['des_potencia']).upper().strip() if pd.notna(row['des_potencia']) else ""
@@ -125,7 +123,7 @@ if not df_raw.empty:
 
     df_raw['Categoria_Macro'] = df_raw['des_categoria'].apply(agrupar_categoria)
     
-    # 3.1 CÁLCULO DE CONSUMO (Energia - kWh)
+    # Consumo kWh
     def calc_consumo(row):
         if str(row['Id_sala']) in salas_24h:
             h = 24
@@ -143,7 +141,7 @@ if not df_raw.empty:
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(calc_consumo, axis=1)
     df_raw['Custo_Consumo_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_kwh
     
-    # 3.2 CÁLCULO DE DEMANDA (Potência - kW)
+    # Demanda kW
     fatores_demanda = {
         'Climatização': 0.85,    
         'Iluminação': 1.00,      
@@ -155,7 +153,6 @@ if not df_raw.empty:
     }
     
     df_raw['Potencia_Instalada_kW'] = df_raw['Potencia_Total_Item_W'] / 1000
-    
     df_raw['Demanda_Estimada_kW'] = df_raw.apply(
         lambda x: x['Potencia_Instalada_kW'] * fatores_demanda.get(x['Categoria_Macro'], 0.5), axis=1
     )
@@ -172,40 +169,56 @@ if not df_raw.empty:
         "🏫 Detalhe Salas"
     ])
 
-    # --- ABA 1: DIMENSIONAMENTO (SEM MULTA) ---
+    # --- ABA 1: DIMENSIONAMENTO & OCUPAÇÃO ---
     with tab1:
         st.subheader("Análise de Pico e Dimensionamento de Contrato")
         
         with st.expander("📚 Como interpretamos o Pico?", expanded=False):
             st.markdown(r"""
-            Como o valor contratado é desconhecido, este painel calcula o **Cenário Ideal**.
-            
-            1.  Calculamos o **Pico de Demanda** baseado nos equipamentos e seus fatores de uso simultâneo.
-            2.  Assumimos que sua **Demanda Contratada** deveria ser igual a esse Pico.
-            3.  O custo exibido é o valor que seria pago mensalmente para manter essa disponibilidade de potência.
+            1.  **Pico Elétrico:** Baseado nos equipamentos e fatores de simultaneidade (Ex: Ar Condicionado = 0.85).
+            2.  **Pico de Pessoas:** A quantidade de pessoas impacta diretamente na carga térmica (ar condicionado) e uso de equipamentos.
             """)
 
-        # KPIs
+        # 1. KPIs ELÉTRICOS
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Potência Instalada (Total)", f"{total_instalado_kw:,.1f} kW", help="Se ligássemos TUDO ao mesmo tempo")
+        col1.metric("Potência Instalada (Total)", f"{total_instalado_kw:,.1f} kW", help="Carga total se tudo ligar junto")
         
-        # O Fator de Demanda Global mostra a eficiência de uso
-        fd_global = (total_demanda_pico_kw / total_instalado_kw) * 100 if total_instalado_kw > 0 else 0
-        col2.metric("Fator de Demanda Global", f"{fd_global:.1f}%", help="Percentual da carga total que funciona simultaneamente no pico")
-
-        col3.metric("Pico Estimado (Contrato Ideal)", f"{total_demanda_pico_kw:,.1f} kW", help="Demanda máxima provável")
-        
-        # Custo baseado no Pico (Sem multa, apenas custo de disponibilidade)
+        # Custo baseado no Pico
         custo_demanda = total_demanda_pico_kw * tarifa_kw_demanda
-        col4.metric("Custo Mensal de Demanda", f"R$ {custo_demanda:,.2f}", help=f"Cálculo: {total_demanda_pico_kw:.1f} kW x R$ {tarifa_kw_demanda:.2f}")
+        col2.metric("Pico Estimado (Contrato Ideal)", f"{total_demanda_pico_kw:,.1f} kW", help="Demanda máxima provável")
+        col3.metric("Custo Mensal de Demanda", f"R$ {custo_demanda:,.2f}")
+        
+        # 2. DADOS DE OCUPAÇÃO (SEU PEDIDO AQUI)
+        if not df_ocupacao.empty:
+            pico_pessoas = df_ocupacao['Ocupacao_Acumulada'].max()
+            if pd.isna(pico_pessoas): pico_pessoas = 0
+            
+            # KPI de Pessoas na coluna 4
+            col4.metric("Pico de Ocupação Real", f"{int(pico_pessoas)} Pessoas", help="Máximo registrado no período")
+        else:
+            col4.metric("Pico de Ocupação", "N/A")
 
         st.divider()
 
-        # Gráfico Gauge: Pico vs Potência Instalada
+        # GRÁFICO DE FLUXO DE PESSOAS
+        if not df_ocupacao.empty:
+            st.markdown("#### 👥 Comportamento da Ocupação")
+            # --- CÓDIGO SOLICITADO ---
+            fig_oc = px.line(
+                df_ocupacao, 
+                x='DataHora', 
+                y='Ocupacao_Acumulada', 
+                title='Fluxo de Pessoas (Acumulado por Dia)'
+            )
+            st.plotly_chart(fig_oc, use_container_width=True)
+            # -------------------------
+        
+        st.divider()
+
+        # 3. DETALHES TÉCNICOS (Gauge e Tabela)
         c_gauge, c_tbl = st.columns([1, 1.5])
         
         with c_gauge:
-            # Gauge comparando o Pico com a Capacidade Total Instalada
             fig_gauge = go.Figure(go.Indicator(
                 mode = "gauge+number",
                 value = total_demanda_pico_kw,
@@ -213,10 +226,10 @@ if not df_raw.empty:
                 title = {'text': "Utilização da Infraestrutura (kW)"},
                 gauge = {
                     'axis': {'range': [None, total_instalado_kw]},
-                    'bar': {'color': "rgba(31, 119, 180, 0.8)"}, # Azul Padrão
+                    'bar': {'color': "rgba(31, 119, 180, 0.8)"}, 
                     'steps': [
-                        {'range': [0, total_demanda_pico_kw], 'color': "rgba(0,0,0,0)"}, # Transparente
-                        {'range': [total_demanda_pico_kw, total_instalado_kw], 'color': "#f0f2f6"}], # Cinza claro
+                        {'range': [0, total_demanda_pico_kw], 'color': "rgba(0,0,0,0)"},
+                        {'range': [total_demanda_pico_kw, total_instalado_kw], 'color': "#f0f2f6"}],
                     'threshold': {
                         'line': {'color': "red", 'width': 4},
                         'thickness': 0.75,
@@ -225,9 +238,8 @@ if not df_raw.empty:
             ))
             st.plotly_chart(fig_gauge, use_container_width=True)
             
-            # Nota sobre transformador
             kVA_calc = total_demanda_pico_kw / 0.92
-            st.info(f"Para suportar esse pico de **{total_demanda_pico_kw:.0f} kW**, recomenda-se um transformador/entrada de energia de pelo menos **{kVA_calc:.0f} kVA**.")
+            st.info(f"Transformador Recomendado: **{kVA_calc:.0f} kVA** (FP 0.92).")
 
         with c_tbl:
             st.markdown("#### Composição do Pico por Categoria")
@@ -290,7 +302,7 @@ if not df_raw.empty:
             st.markdown("##### Resultados Projetados")
             m1, m2, m3 = st.columns(3)
             m1.metric("Economia Mensal Estimada", f"R$ {eco_financeira:,.2f}")
-            m2.metric("Redução de Carga (Alívio Demanda)", f"{total_demanda_pico_kw * 0.15:,.1f} kW", help="Redução estimada no Pico.")
+            m2.metric("Redução de Carga (Alívio Demanda)", f"{total_demanda_pico_kw * 0.15:,.1f} kW")
             m3.metric("Payback Simples", f"{payback:.1f} meses")
             
             if payback < 12: st.success("✅ Alta Viabilidade")
