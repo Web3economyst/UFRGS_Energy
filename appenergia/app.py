@@ -174,7 +174,6 @@ if not df_raw.empty:
         demanda_estimada_pico = potencia_instalada_total_kw * 0.6 
 
     # Eficiência (Fixa para estimativa técnica)
-    # Ajustei para incluir Sensores na lógica da iluminação (LED + Sensor = 60%)
     fator_economia = {
         'Climatização': 0.40,     # Inverter vs Convencional
         'Iluminação': 0.60,       # LED + Sensores de Presença
@@ -199,17 +198,18 @@ if not df_raw.empty:
         "💰 ROI Projeto"
     ])
 
-    # --- ABA 1: DEMANDA (REFINADA) ---
+    # --- ABA 1: DEMANDA (CORRIGIDA) ---
     with tab1:
         st.subheader("Monitoramento de Pico de Demanda")
         
         col_graf, col_info = st.columns([1, 1])
         
         with col_graf:
-            # Gráfico de Velocímetro (Gauge) - Mais leve
+            # Gráfico de Velocímetro (Gauge)
             fig_gauge = go.Figure(go.Indicator(
                 mode = "gauge+number",
-                value = demande_estimada_pico if 'demanda_estimada_pico' in locals() else 0,
+                # CORREÇÃO AQUI: "demanda" com "a"
+                value = demanda_estimada_pico if 'demanda_estimada_pico' in locals() else 0,
                 title = {'text': "Pico Estimado (kW)"},
                 gauge = {
                     'axis': {'range': [None, potencia_instalada_total_kw]},
@@ -220,7 +220,8 @@ if not df_raw.empty:
                     'threshold': {
                         'line': {'color': "red", 'width': 4},
                         'thickness': 0.75,
-                        'value': demande_estimada_pico if 'demanda_estimada_pico' in locals() else 0}
+                        # CORREÇÃO AQUI: "demanda" com "a"
+                        'value': demanda_estimada_pico if 'demanda_estimada_pico' in locals() else 0}
                 }
             ))
             fig_gauge.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
