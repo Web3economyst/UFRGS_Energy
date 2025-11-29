@@ -13,11 +13,6 @@ st.title("⚡ Gestão de Energia — Dimensionamento e Consumo")
 st.markdown("""
 Painel completo para **dimensionamento de demanda**, **consumo**, 
 **análise de ocupação**, **eficiência** e **viabilidade econômica**.
-
-Inclui:
-- Cálculo realista com **sazonalidade avançada**
-- Comparação entre **Pico de Demanda (kW)** e **Uso Real (kWh)**
-- Transformador recomendado
 """)
 
 # ---------------------------------------------------
@@ -125,59 +120,63 @@ if not df_raw.empty:
         lista_salas = sorted(df_raw['Id_sala'].unique().astype(str))
         salas_24h = st.multiselect("Escolha:", lista_salas)
 
+        # SLIDERS AGORA VINCULADOS ESTRITAMENTE ÀS 5 CATEGORIAS
         with st.expander("Horas de Uso por Categoria", expanded=True):
-            horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
-            horas_luz = st.slider("Iluminação", 0, 24, 10)
+            horas_ar = st.slider("Climatização", 0, 24, 8)
             horas_pc = st.slider("Informática", 0, 24, 9)
-            horas_eletro = st.slider("Eletrodomésticos", 0, 24, 5, help="Geladeiras, micro-ondas, cafeteiras, etc.")
+            horas_luz = st.slider("Iluminação", 0, 24, 10)
+            horas_eletro = st.slider("Eletrodoméstico", 0, 24, 5) # Singular conforme seu pedido
             horas_outros = st.slider("Outros", 0, 24, 6)
             dias_mes = st.number_input("Dias no mês", value=22)
 
     # ---------------------------------------------------
-    # 3. CÁLCULOS TÉCNICOS (AGRUPAMENTO CORRIGIDO COMPLETO)
+    # 3. CÁLCULOS TÉCNICOS (AGRUPAMENTO RIGOROSO)
     # ---------------------------------------------------
 
     def agrupar(cat):
-        c = str(cat).upper()
-        if "CLIM" in c or "AR" in c: return "Climatização"
-        if "ILUM" in c or "LÂMP" in c: return "Iluminação"
+        c = str(cat).upper().strip()
         
-        # Informática (Ajuste anterior)
-        if "COMP" in c or "MONIT" in c or "INFORM" in c or "PC" in c or "TI" in c or "NOTE" in c: 
-            return "Informática"
-        
-        # --- CORREÇÃO AQUI (ELETRODOMÉSTICOS) ---
-        # Lista expandida para capturar tudo
-        termos_eletro = [
-            "ELETRO", "GELADEIRA", "MICRO", "REFRIGERADOR", 
-            "FREEZER", "FRIGOBAR", "CAFETEIRA", "BEBEDOURO", 
-            "FOGÃO", "FOGAO", "FORNO", "JARRA", "CHALEIRA", "LAVADORA"
-        ]
-        if any(termo in c for termo in termos_eletro):
-            return "Eletrodomésticos"
-
-        if "ELEV" in c: return "Elevadores"
-        if "BOMB" in c: return "Bombas"
-        return "Outros"
+        # 1. CLIMATIZAÇÃO
+        if any(x in c for x in ['CLIM', 'AR', 'SPLIT', 'VENTILADOR', 'CONDICIONADO', 'TERMO']):
+            return 'Climatização'
+            
+        # 2. ILUMINAÇÃO
+        if any(x in c for x in ['ILUM', 'LAMP', 'LED', 'REFLETOR', 'LUMINARIA']):
+            return 'Iluminação'
+            
+        # 3. INFORMÁTICA
+        if any(x in c for x in ['INFORM', 'COMP', 'PC', 'MONIT', 'NOTE', 'TI', 'IMPRESSORA', 'RACK', 'WIFI', 'MODEM', 'SWITCH', 'NOBREAK', 'PROJETOR']):
+            return 'Informática'
+            
+        # 4. ELETRODOMÉSTICO
+        if any(x in c for x in ['ELETRO', 'GELADEIRA', 'MICRO', 'CAFÉ', 'CAFE', 'FRIGOBAR', 'BEBEDOURO', 'REFRIGERADOR', 'FREEZER', 'FOGÃO', 'FORNO', 'LAVADORA', 'JARRA', 'CHALEIRA']):
+            return 'Eletrodoméstico' # Singular para bater com seu pedido
+            
+        # 5. OUTROS (Todo o resto cai aqui)
+        return 'Outros'
 
     df_raw['Categoria_Macro'] = df_raw['des_categoria'].apply(agrupar)
 
-    # Consumo com sazonalidade avançada
+    # CÁLCULO DE CONSUMO LIGADO AOS SLIDERS CORRETOS
     def consumo(row):
         cat = row['Categoria_Macro']
+        
+        # Regra de Salas 24h
         if str(row['Id_sala']) in salas_24h:
             h = 24
             dias = 30
         else:
+            # Mapeamento exato Slider -> Categoria
             if cat == "Climatização": h = horas_ar
-            elif cat == "Iluminação": h = horas_luz
             elif cat == "Informática": h = horas_pc
-            elif cat == "Eletrodomésticos": h = horas_eletro
-            else: h = horas_outros
+            elif cat == "Iluminação": h = horas_luz
+            elif cat == "Eletrodoméstico": h = horas_eletro
+            else: h = horas_outros # Categoria 'Outros'
             dias = dias_mes
 
         cons = (row['Potencia_Total_Item_W'] * h * dias) / 1000
         
+        # Sazonalidade (apenas ar condicionado)
         if cat == 'Climatização':
             return cons * fator_sazonal_clima
         return cons
@@ -185,24 +184,24 @@ if not df_raw.empty:
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(consumo, axis=1)
     df_raw['Custo_Consumo_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_kwh
 
-    # Demanda
+    # CÁLCULO DE DEMANDA (Definição dos Fatores para as 5 Categorias)
     fatores_demanda = {
         'Climatização': 0.85,
-        'Iluminação': 1.00,
         'Informática': 0.70,
-        'Eletrodomésticos': 0.50,
-        'Elevadores': 0.30,
-        'Bombas': 0.70,
+        'Iluminação': 1.00,
+        'Eletrodoméstico': 0.50,
         'Outros': 0.50
     }
 
     df_raw['Potencia_Instalada_kW'] = df_raw['Potencia_Total_Item_W'] / 1000
+    
+    # Se a categoria não estiver no dict, usa 0.5 como padrão
     df_raw['Demanda_Estimada_kW'] = df_raw.apply(
         lambda x: x['Potencia_Instalada_kW'] * fatores_demanda.get(x['Categoria_Macro'], 0.5),
         axis=1
     )
 
-    # Totais
+    # TOTAIS GLOBAIS
     total_instalado_kw = df_raw['Potencia_Instalada_kW'].sum()
     total_demanda_pico_kw = df_raw['Demanda_Estimada_kW'].sum()
     consumo_total_kwh = df_raw['Consumo_Mensal_kWh'].sum()
@@ -329,17 +328,15 @@ if not df_raw.empty:
     # TAB 3 — EFICIÊNCIA
     # ---------------------------------------------------
     with tab_eff:
-        st.subheader("💡 Eficiência Energética — Potencial de Redução (%) e Economia")
+        st.subheader("💡 Eficiência Energética — Potencial de Redução")
 
-        # MODELO DE EFICIÊNCIA REAL
+        # MODELO DE EFICIÊNCIA REAL (Atualizado para as 5 categorias)
         eficiencia_params = {
-            "Iluminação": 0.60,
-            "Climatização": 0.35,
-            "Informática": 0.40,
-            "Eletrodomésticos": 0.20,
-            "Elevadores": 0.05,
-            "Bombas": 0.15,
-            "Outros": 0.10
+            "Climatização": 0.35,       # 35%
+            "Informática": 0.40,        # 40%
+            "Iluminação": 0.60,         # 60%
+            "Eletrodoméstico": 0.20,    # 20%
+            "Outros": 0.05
         }
 
         resumo = (
@@ -374,27 +371,19 @@ if not df_raw.empty:
             hide_index=True
         )
 
-        st.divider()
-
         col_b, col_p = st.columns([1.6, 1])
         with col_b:
             fig_econ = px.bar(
-                resumo,
-                x="Categoria_Macro",
-                y="Economia_R$",
-                text_auto=".2s",
-                title="Economia Potencial por Categoria (R$)",
+                resumo, x="Categoria_Macro", y="Economia_R$",
+                text_auto=".2s", title="Economia Potencial (R$)",
                 color="Categoria_Macro"
             )
             st.plotly_chart(fig_econ, use_container_width=True)
 
         with col_p:
             fig_pie_e = px.pie(
-                resumo,
-                values="Economia_R$",
-                names="Categoria_Macro",
-                hole=0.4,
-                title="Distribuição da Economia"
+                resumo, values="Economia_R$", names="Categoria_Macro",
+                hole=0.4, title="Distribuição da Economia"
             )
             st.plotly_chart(fig_pie_e, use_container_width=True)
 
@@ -416,7 +405,7 @@ if not df_raw.empty:
             custo_ar = st.number_input("Ar Inverter (R$)", value=3500.0)
             custo_pc = st.number_input("Mini PC (R$)", value=2800.0)
             
-            st.info("Prioridade: 1) Iluminação, 2) Clima, 3) TI")
+            st.info("Prioridade: 1) Iluminação, 2) Climatização, 3) Informática")
 
         # ALOCAÇÃO
         with col_r:
