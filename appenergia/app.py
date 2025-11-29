@@ -183,17 +183,14 @@ if not df_raw.empty:
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Potência Instalada (Total)", f"{total_instalado_kw:,.1f} kW", help="Carga total se tudo ligar junto")
         
-        # Custo baseado no Pico
         custo_demanda = total_demanda_pico_kw * tarifa_kw_demanda
         col2.metric("Pico Estimado (Contrato Ideal)", f"{total_demanda_pico_kw:,.1f} kW", help="Demanda máxima provável")
         col3.metric("Custo Mensal de Demanda", f"R$ {custo_demanda:,.2f}")
         
-        # 2. DADOS DE OCUPAÇÃO (SEU PEDIDO AQUI)
+        # 2. DADOS DE OCUPAÇÃO
         if not df_ocupacao.empty:
             pico_pessoas = df_ocupacao['Ocupacao_Acumulada'].max()
             if pd.isna(pico_pessoas): pico_pessoas = 0
-            
-            # KPI de Pessoas na coluna 4
             col4.metric("Pico de Ocupação Real", f"{int(pico_pessoas)} Pessoas", help="Máximo registrado no período")
         else:
             col4.metric("Pico de Ocupação", "N/A")
@@ -203,7 +200,6 @@ if not df_raw.empty:
         # GRÁFICO DE FLUXO DE PESSOAS
         if not df_ocupacao.empty:
             st.markdown("#### 👥 Comportamento da Ocupação")
-            # --- CÓDIGO SOLICITADO ---
             fig_oc = px.line(
                 df_ocupacao, 
                 x='DataHora', 
@@ -211,11 +207,10 @@ if not df_raw.empty:
                 title='Fluxo de Pessoas (Acumulado por Dia)'
             )
             st.plotly_chart(fig_oc, use_container_width=True)
-            # -------------------------
         
         st.divider()
 
-        # 3. DETALHES TÉCNICOS (Gauge e Tabela)
+        # 3. DETALHES TÉCNICOS
         c_gauge, c_tbl = st.columns([1, 1.5])
         
         with c_gauge:
@@ -309,14 +304,47 @@ if not df_raw.empty:
             elif payback < 36: st.info("⚠️ Viabilidade Média")
             else: st.warning("❌ Payback Longo")
 
-    # --- ABA 4: DETALHE SALAS ---
+    # --- ABA 4: DETALHE SALAS (NOVO LAYOUT) ---
     with tab4:
-        st.subheader("Consulta por Ambiente")
-        sel_sala = st.selectbox("Selecione a Sala:", sorted(df_raw['Id_sala'].unique().astype(str)))
+        st.subheader("Detalhamento por Nível e Ambiente")
         
-        if sel_sala:
-            df_s = df_raw[df_raw['Id_sala'] == sel_sala]
-            st.dataframe(df_s[['des_nome_equipamento', 'Quant', 'Potencia_Instalada_kW', 'Demanda_Estimada_kW', 'Consumo_Mensal_kWh']])
+        col_andar, col_sala = st.columns(2)
+        
+        # COLUNA 1: ANDARES
+        with col_andar:
+            st.markdown("### 🏢 Por Andar")
+            andares = sorted(df_raw['num_andar'].unique().astype(str))
+            sel_andar = st.selectbox("Selecione o Andar:", andares)
+            
+            if sel_andar:
+                df_a = df_raw[df_raw['num_andar'] == sel_andar]
+                custo_andar = df_a['Custo_Consumo_R$'].sum()
+                
+                # Exibe o Custo TOTAL do Andar
+                st.metric(f"Custo Total - {sel_andar}", f"R$ {custo_andar:,.2f}")
+                
+                st.caption("Salas com maior consumo neste andar:")
+                df_a_agrupado = df_a.groupby('Id_sala')[['Custo_Consumo_R$']].sum().reset_index().sort_values('Custo_Consumo_R$', ascending=False)
+                st.dataframe(df_a_agrupado.style.format({"Custo_Consumo_R$": "R$ {:.2f}"}), use_container_width=True, hide_index=True)
+
+        # COLUNA 2: SALAS INDIVIDUAIS
+        with col_sala:
+            st.markdown("### 🚪 Por Sala")
+            salas = sorted(df_raw['Id_sala'].unique().astype(str))
+            sel_sala = st.selectbox("Selecione a Sala:", salas)
+            
+            if sel_sala:
+                df_s = df_raw[df_raw['Id_sala'] == sel_sala]
+                custo_sala = df_s['Custo_Consumo_R$'].sum()
+                
+                # Exibe o Custo TOTAL da Sala
+                st.metric(f"Custo Total - {sel_sala}", f"R$ {custo_sala:,.2f}")
+                
+                st.caption("Equipamentos nesta sala:")
+                st.dataframe(
+                    df_s[['des_nome_equipamento', 'Quant', 'Potencia_Instalada_kW', 'Custo_Consumo_R$']].sort_values('Custo_Consumo_R$', ascending=False),
+                    use_container_width=True, hide_index=True
+                )
 
 else:
     st.info("Aguardando dados... Se o erro persistir, verifique a conexão com o GitHub.")
