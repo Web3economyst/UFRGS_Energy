@@ -5,11 +5,12 @@ import plotly.graph_objects as go
 import numpy as np
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Dashboard de Energia (Engenharia)", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Dashboard de Energia (Dimensionamento)", layout="wide", page_icon="⚡")
 
-st.title("⚡ Gestão de Energia: Demanda e Contratos")
+st.title("⚡ Gestão de Energia: Dimensionamento de Demanda")
 st.markdown("""
-Monitoramento técnico focado em **Contratos de Energia (Grupo A)**, dimensionamento de demanda e fator de potência.
+Este painel calcula a **Demanda de Pico Estimada** com base na carga instalada e fatores de simultaneidade. 
+O custo financeiro é projetado considerando que o contrato seja ajustado para este pico (Cenário Ideal).
 """)
 
 # --- 1. CARREGAMENTO E TRATAMENTO DE DADOS ---
@@ -90,23 +91,18 @@ def load_data():
 df_raw, df_ocupacao = load_data()
 
 if not df_raw.empty:
-    # --- 2. SIDEBAR: CONTRATOS E PERFIL ---
+    # --- 2. SIDEBAR ---
     with st.sidebar:
-        st.header("⚙️ Parâmetros do Contrato")
+        st.header("⚙️ Parâmetros")
         
-        st.subheader("📋 Contrato com a Concessionária")
-        demanda_contratada = st.number_input("Demanda Contratada (kW)", value=300.0, step=10.0, help="Valor fixo pago mensalmente pela disponibilidade.")
-        fp_alvo = st.number_input("Fator de Potência Mínimo", value=0.92, step=0.01, help="Abaixo disso paga-se multa de reativo.")
-        
-        st.divider()
-        st.subheader("💰 Tarifas")
+        st.subheader("💰 Tarifas Locais")
         tarifa_kwh = st.number_input("Tarifa Consumo (R$/kWh)", value=0.65)
-        tarifa_kw_demanda = st.number_input("Tarifa Demanda (R$/kW)", value=40.00)
+        tarifa_kw_demanda = st.number_input("Tarifa Demanda (R$/kW)", value=40.00, help="Valor cobrado por kW de potência disponível.")
         
         st.divider()
-        st.subheader("🕒 Operação")
+        st.subheader("🕒 Salas Críticas (24h)")
         lista_salas = sorted(df_raw['Id_sala'].unique().astype(str))
-        salas_24h = st.multiselect("Salas 24h (Servidores/Críticas):", lista_salas)
+        salas_24h = st.multiselect("Selecione Salas 24h:", lista_salas)
         
         with st.expander("Horas de Uso (Geral)", expanded=False):
             horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
@@ -148,134 +144,94 @@ if not df_raw.empty:
     df_raw['Custo_Consumo_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_kwh
     
     # 3.2 CÁLCULO DE DEMANDA (Potência - kW)
-    # Fatores de Demanda Típicos (Simultaneidade)
     fatores_demanda = {
-        'Climatização': 0.85,    # Nem todos os compressores ligam juntos
-        'Iluminação': 1.00,      # Geralmente tudo aceso no horário comercial
-        'Informática': 0.70,     # Nem todos PCs em processamento máximo
-        'Eletrodomésticos': 0.50,# Uso intermitente (cafeteira, microondas)
-        'Elevadores': 0.30,      # Uso esporádico
+        'Climatização': 0.85,    
+        'Iluminação': 1.00,      
+        'Informática': 0.70,     
+        'Eletrodomésticos': 0.50,
+        'Elevadores': 0.30,      
         'Bombas': 0.70,
         'Outros': 0.50
     }
     
-    # Potência Instalada (Soma simples das placas dos equipamentos)
     df_raw['Potencia_Instalada_kW'] = df_raw['Potencia_Total_Item_W'] / 1000
     
-    # Demanda Provável (Aplicando fator de simultaneidade)
     df_raw['Demanda_Estimada_kW'] = df_raw.apply(
         lambda x: x['Potencia_Instalada_kW'] * fatores_demanda.get(x['Categoria_Macro'], 0.5), axis=1
     )
 
-    # Agregações
     total_instalado_kw = df_raw['Potencia_Instalada_kW'].sum()
     total_demanda_pico_kw = df_raw['Demanda_Estimada_kW'].sum()
     
-    # Ajuste Fino com Ocupação (Opcional: Se ocupação for muito baixa, reduz a demanda variável)
-    if not df_ocupacao.empty and 'Ocupacao_Acumulada' in df_ocupacao.columns:
-        pico_pessoas = df_ocupacao['Ocupacao_Acumulada'].max()
-        if pd.isna(pico_pessoas): pico_pessoas = 100 # Valor default
-    else:
-        pico_pessoas = 0
-
-    # 3.3 FATOR DE POTÊNCIA (kVA)
-    # Estimativa simples: Assumindo FP atual médio de 0.88 (levemente indutivo) para simular correção
-    fp_atual_simulado = 0.88 
-    total_kva = total_demanda_pico_kw / fp_atual_simulado
-
     # --- 4. VISUALIZAÇÃO ---
     
     tab1, tab2, tab3, tab4 = st.tabs([
-        "📉 Demanda & Contrato", 
+        "📉 Dimensionamento Demanda", 
         "⚡ Consumo (kWh)", 
         "💡 Eficiência & ROI", 
         "🏫 Detalhe Salas"
     ])
 
-    # --- ABA 1: DEMANDA & CONTRATO (Foco do Usuário) ---
+    # --- ABA 1: DIMENSIONAMENTO (SEM MULTA) ---
     with tab1:
-        st.subheader("Monitoramento de Pico e Contrato de Energia")
+        st.subheader("Análise de Pico e Dimensionamento de Contrato")
         
-        # Bloco Explicativo (Toggle)
-        with st.expander("📚 Como é calculado o Pico de Demanda?", expanded=False):
+        with st.expander("📚 Como interpretamos o Pico?", expanded=False):
             st.markdown(r"""
-            **Diferença entre Consumo e Demanda:**
+            Como o valor contratado é desconhecido, este painel calcula o **Cenário Ideal**.
             
-            1.  **Consumo (kWh):** É o acumulado do mês (Energia Total). Fórmula: $kWh = \sum (kW \times horas \times 30)$.
-            2.  **Demanda de Pico (kW):** É a "largura do cano" necessária. É o momento de maior uso simultâneo.
-            
-            **O Cálculo da Demanda neste Painel:**
-            Somamos a potência de todos os equipamentos e aplicamos um **Fator de Demanda (FD)**, pois nem tudo liga ao mesmo tempo.
-            
-            * $P_{Ar} \times 0.85$ (Compressores ciclam)
-            * $P_{Luz} \times 1.00$ (Tudo aceso)
-            * $P_{Tomadas} \times 0.50$ (Uso aleatório)
-            
-            **Por que importa?** Se o Pico Estimado > Demanda Contratada, você paga multa de ultrapassagem (normalmente 2x a tarifa).
+            1.  Calculamos o **Pico de Demanda** baseado nos equipamentos e seus fatores de uso simultâneo.
+            2.  Assumimos que sua **Demanda Contratada** deveria ser igual a esse Pico.
+            3.  O custo exibido é o valor que seria pago mensalmente para manter essa disponibilidade de potência.
             """)
 
-        # KPIs Principais
+        # KPIs
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Potência Instalada Total", f"{total_instalado_kw:,.1f} kW", help="Soma das placas de todos equipamentos")
+        col1.metric("Potência Instalada (Total)", f"{total_instalado_kw:,.1f} kW", help="Se ligássemos TUDO ao mesmo tempo")
         
-        delta_demanda = demanda_contratada - total_demanda_pico_kw
-        cor_delta = "normal" if delta_demanda >= 0 else "inverse"
-        label_delta = "Dentro do Contrato" if delta_demanda >= 0 else "⚠️ Ultrapassagem (Multa)"
+        # O Fator de Demanda Global mostra a eficiência de uso
+        fd_global = (total_demanda_pico_kw / total_instalado_kw) * 100 if total_instalado_kw > 0 else 0
+        col2.metric("Fator de Demanda Global", f"{fd_global:.1f}%", help="Percentual da carga total que funciona simultaneamente no pico")
+
+        col3.metric("Pico Estimado (Contrato Ideal)", f"{total_demanda_pico_kw:,.1f} kW", help="Demanda máxima provável")
         
-        col2.metric("Pico de Demanda Estimado", f"{total_demanda_pico_kw:,.1f} kW", delta=f"{label_delta}", delta_color=cor_delta)
-        col3.metric("Demanda Contratada", f"{demanda_contratada:,.1f} kW", help="Custo Fixo Mensal")
-        
-        # Custo da Demanda
-        custo_fixo_demanda = demanda_contratada * tarifa_kw_demanda
-        multa_est = 0
-        if total_demanda_pico_kw > demanda_contratada:
-            multa_est = (total_demanda_pico_kw - demanda_contratada) * tarifa_kw_demanda * 2 # Multa aprox 2x
-        
-        col4.metric("Fatura de Demanda", f"R$ {custo_fixo_demanda:,.2f}", delta=f"+ R$ {multa_est:,.2f} Multa" if multa_est > 0 else "Sem Multa", delta_color="inverse")
+        # Custo baseado no Pico (Sem multa, apenas custo de disponibilidade)
+        custo_demanda = total_demanda_pico_kw * tarifa_kw_demanda
+        col4.metric("Custo Mensal de Demanda", f"R$ {custo_demanda:,.2f}", help=f"Cálculo: {total_demanda_pico_kw:.1f} kW x R$ {tarifa_kw_demanda:.2f}")
 
         st.divider()
 
-        # Gráfico Gauge (Velocímetro) - Visualização Clara da Ultrapassagem
+        # Gráfico Gauge: Pico vs Potência Instalada
         c_gauge, c_tbl = st.columns([1, 1.5])
         
         with c_gauge:
-            max_gauge = max(demanda_contratada * 1.5, total_instalado_kw)
+            # Gauge comparando o Pico com a Capacidade Total Instalada
             fig_gauge = go.Figure(go.Indicator(
-                mode = "gauge+number+delta",
+                mode = "gauge+number",
                 value = total_demanda_pico_kw,
                 domain = {'x': [0, 1], 'y': [0, 1]},
-                title = {'text': "Utilização da Demanda (kW)"},
-                delta = {'reference': demanda_contratada, 'increasing': {'color': "red"}, 'decreasing': {'color': "green"}},
+                title = {'text': "Utilização da Infraestrutura (kW)"},
                 gauge = {
-                    'axis': {'range': [None, max_gauge]},
-                    # CORRIGIDO: Opacity removido e usado RGBA no lugar
-                    'bar': {'color': "rgba(0,0,0,0.7)"}, 
+                    'axis': {'range': [None, total_instalado_kw]},
+                    'bar': {'color': "rgba(31, 119, 180, 0.8)"}, # Azul Padrão
                     'steps': [
-                        {'range': [0, demanda_contratada * 0.9], 'color': "#90EE90"}, # Verde
-                        {'range': [demanda_contratada * 0.9, demanda_contratada], 'color': "#FFFFE0"}, # Amarelo
-                        {'range': [demanda_contratada, max_gauge], 'color': "#FFB6C1"}], # Vermelho
+                        {'range': [0, total_demanda_pico_kw], 'color': "rgba(0,0,0,0)"}, # Transparente
+                        {'range': [total_demanda_pico_kw, total_instalado_kw], 'color': "#f0f2f6"}], # Cinza claro
                     'threshold': {
                         'line': {'color': "red", 'width': 4},
                         'thickness': 0.75,
-                        'value': demanda_contratada}
+                        'value': total_demanda_pico_kw}
                 }
             ))
             st.plotly_chart(fig_gauge, use_container_width=True)
             
-            # Análise de Fator de Potência (Extra)
-            st.markdown("#### 🧮 Fator de Potência (kVA)")
-            kVA_calc = total_demanda_pico_kw / fp_atual_simulado
-            st.info(f"""
-            Estimativa considerando FP atual de **{fp_atual_simulado}**:
-            * Potência Aparente Necessária: **{kVA_calc:,.1f} kVA**
-            * Transformador Recomendado: **{500 if kVA_calc < 450 else 750} kVA**
-            * Meta de FP: **{fp_alvo}** (Se < {fp_alvo} gera multa de reativo).
-            """)
+            # Nota sobre transformador
+            kVA_calc = total_demanda_pico_kw / 0.92
+            st.info(f"Para suportar esse pico de **{total_demanda_pico_kw:.0f} kW**, recomenda-se um transformador/entrada de energia de pelo menos **{kVA_calc:.0f} kVA**.")
 
         with c_tbl:
-            st.markdown("#### Composição da Demanda por Carga")
+            st.markdown("#### Composição do Pico por Categoria")
             df_demanda_cat = df_raw.groupby('Categoria_Macro')[['Potencia_Instalada_kW', 'Demanda_Estimada_kW']].sum().reset_index()
-            # Adiciona coluna do Fator usado
             df_demanda_cat['Fator Demanda'] = df_demanda_cat['Categoria_Macro'].map(fatores_demanda)
             df_demanda_cat = df_demanda_cat.sort_values('Demanda_Estimada_kW', ascending=False)
             
@@ -298,7 +254,7 @@ if not df_raw.empty:
         
         k1, k2 = st.columns(2)
         k1.metric("Consumo Mensal Total", f"{consumo_total_kwh:,.0f} kWh")
-        k2.metric("Custo do Consumo", f"R$ {custo_total_consumo:,.2f}", help="Não inclui o custo da demanda fixa")
+        k2.metric("Custo do Consumo", f"R$ {custo_total_consumo:,.2f}", help="Custo apenas da energia consumida")
         
         st.divider()
         c_bar, c_pie = st.columns([2, 1])
@@ -319,7 +275,6 @@ if not df_raw.empty:
     with tab3:
         st.subheader("Estudo de Viabilidade (Retrofit)")
         
-        # Simulador simples
         col_input, col_result = st.columns([1, 2])
         
         with col_input:
@@ -328,24 +283,19 @@ if not df_raw.empty:
             st.caption("Focando em troca de iluminação (LED) e Ar Condicionado (Inverter).")
         
         with col_result:
-            # Cálculo simplificado de economia
-            # Assumindo que 40% do consumo é Ar e 30% é Luz
-            eco_potencial_kwh = (consumo_total_kwh * 0.4 * 0.4) + (consumo_total_kwh * 0.3 * 0.6) # 40% eco no ar, 60% na luz
+            eco_potencial_kwh = (consumo_total_kwh * 0.4 * 0.4) + (consumo_total_kwh * 0.3 * 0.6)
             eco_financeira = eco_potencial_kwh * tarifa_kwh
             payback = investimento / eco_financeira if eco_financeira > 0 else 0
             
             st.markdown("##### Resultados Projetados")
             m1, m2, m3 = st.columns(3)
             m1.metric("Economia Mensal Estimada", f"R$ {eco_financeira:,.2f}")
-            m2.metric("Redução de Carga (Alívio Demanda)", f"{total_demanda_pico_kw * 0.15:,.1f} kW", help="Estima-se 15% de queda na demanda de pico.")
+            m2.metric("Redução de Carga (Alívio Demanda)", f"{total_demanda_pico_kw * 0.15:,.1f} kW", help="Redução estimada no Pico.")
             m3.metric("Payback Simples", f"{payback:.1f} meses")
             
-            if payback < 12:
-                st.success("✅ Projeto de altíssima viabilidade (Payback < 1 ano)")
-            elif payback < 36:
-                st.info("⚠️ Viabilidade média (1 a 3 anos)")
-            else:
-                st.warning("❌ Payback longo. Reavaliar escopo.")
+            if payback < 12: st.success("✅ Alta Viabilidade")
+            elif payback < 36: st.info("⚠️ Viabilidade Média")
+            else: st.warning("❌ Payback Longo")
 
     # --- ABA 4: DETALHE SALAS ---
     with tab4:
