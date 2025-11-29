@@ -9,9 +9,7 @@ st.set_page_config(page_title="Dashboard de Energia (Dimensionamento)", layout="
 
 st.title("⚡ Gestão de Energia: Dimensionamento de Demanda")
 st.markdown("""
-Este painel simula os dois componentes da fatura de energia do Grupo A:
-1. **Demanda (Fixo):** O custo da infraestrutura necessária (potência).
-2. **Consumo (Variável):** O custo da energia efetivamente utilizada.
+Painel de gestão de contratos de energia, dimensionamento de demanda e análise de viabilidade de projetos de eficiência.
 """)
 
 # --- 1. CARREGAMENTO E TRATAMENTO DE DADOS ---
@@ -90,13 +88,27 @@ def load_data():
 df_raw, df_ocupacao = load_data()
 
 if not df_raw.empty:
-    # --- 2. SIDEBAR ---
+    # --- 2. SIDEBAR COM SAZONALIDADE ---
     with st.sidebar:
-        st.header("⚙️ Parâmetros")
+        st.header("⚙️ Parâmetros & Sazonalidade")
         
-        st.subheader("💰 Tarifas Locais")
-        tarifa_kwh = st.number_input("Tarifa Consumo (R$/kWh)", value=0.65, help="Preço da energia gasta")
-        tarifa_kw_demanda = st.number_input("Tarifa Demanda (R$/kW)", value=40.00, help="Preço fixo da potência disponibilizada (fio)")
+        # Sazonalidade
+        st.subheader("🌦️ Período de Análise")
+        periodo = st.radio("Selecione a Estação:", ["Verão (Alto Consumo Ar)", "Inverno/Ameno (Baixo Consumo Ar)"])
+        
+        # Lógica de Tarifas baseada na estação (Exemplo: Verão tarifa mais cara ou igual)
+        tarifa_padrao = 0.65
+        if "Verão" in periodo:
+            fator_sazonal_clima = 1.30 # Ar condicionado consome 30% a mais
+            tarifa_sugerida = 0.72     # Tarifa um pouco mais cara (Bandeira)
+        else:
+            fator_sazonal_clima = 0.60 # Ar condicionado consome 40% a menos
+            tarifa_sugerida = 0.58     # Tarifa base
+        
+        st.divider()
+        st.subheader("💰 Tarifas (Ajustáveis)")
+        tarifa_kwh = st.number_input("Tarifa Consumo (R$/kWh)", value=tarifa_sugerida, format="%.2f", help="Ajustado conforme estação selecionada acima.")
+        tarifa_kw_demanda = st.number_input("Tarifa Demanda (R$/kW)", value=40.00, help="Preço fixo da potência.")
         
         st.divider()
         st.subheader("🕒 Salas Críticas (24h)")
@@ -124,20 +136,28 @@ if not df_raw.empty:
 
     df_raw['Categoria_Macro'] = df_raw['des_categoria'].apply(agrupar_categoria)
     
-    # Consumo kWh
+    # Consumo kWh com SAZONALIDADE
     def calc_consumo(row):
+        cat = row['Categoria_Macro']
+        
+        # Lógica de Horas
         if str(row['Id_sala']) in salas_24h:
             h = 24
             dias_calculo = 30
         else:
-            cat = row['Categoria_Macro']
             if cat == 'Climatização': h = horas_ar
             elif cat == 'Iluminação': h = horas_luz
             elif cat == 'Informática': h = horas_pc
             elif cat == 'Eletrodomésticos': h = horas_eletro
             else: h = horas_outros
             dias_calculo = dias_mes
-        return (row['Potencia_Total_Item_W'] * h * dias_calculo) / 1000
+            
+        consumo_base = (row['Potencia_Total_Item_W'] * h * dias_calculo) / 1000
+        
+        # Aplica Sazonalidade apenas no Ar Condicionado
+        if cat == 'Climatização':
+            return consumo_base * fator_sazonal_clima
+        return consumo_base
 
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(calc_consumo, axis=1)
     df_raw['Custo_Consumo_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_kwh
@@ -172,52 +192,38 @@ if not df_raw.empty:
     tab1, tab2, tab3, tab4 = st.tabs([
         "📉 Dimensionamento Demanda", 
         "⚡ Consumo (kWh)", 
-        "💡 Eficiência & ROI", 
+        "💡 Viabilidade & Eficiência", 
         "🏫 Detalhe Salas"
     ])
 
-    # --- ABA 1: DIMENSIONAMENTO (CUSTO FIXO) ---
+    # --- ABA 1: DIMENSIONAMENTO ---
     with tab1:
         st.subheader("Análise de Demanda (Custo Fixo de Disponibilidade)")
+        st.caption(f"Cenário Considerado: **{periodo}** (Fator Clima: {fator_sazonal_clima}x)")
         
-        with st.expander("📚 Por que esse valor é diferente do Consumo?", expanded=False):
-            st.markdown(r"""
-            **Este painel calcula apenas o 'Aluguel do Fio' (Demanda Contratada).**
-            * Você paga um valor fixo pela velocidade (potência - kW), usando ou não.
-            * O valor abaixo é o custo sugerido de contrato para suportar seus equipamentos.
-            """)
-
-        # 1. KPIs ELÉTRICOS
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Potência Instalada (Total)", f"{total_instalado_kw:,.1f} kW")
-        col2.metric("Pico Estimado (Contrato Ideal)", f"{total_demanda_pico_kw:,.1f} kW")
-        col3.metric("Custo Fixo (Demanda)", f"R$ {custo_demanda_fixo:,.2f}", help="Valor fixo mensal pago pela disponibilidade (kW x Tarifa Demanda)")
+        col1.metric("Potência Instalada", f"{total_instalado_kw:,.1f} kW")
+        col2.metric("Pico Estimado", f"{total_demanda_pico_kw:,.1f} kW")
+        col3.metric("Custo Fixo (Demanda)", f"R$ {custo_demanda_fixo:,.2f}")
         
         if not df_ocupacao.empty:
             pico_pessoas = df_ocupacao['Ocupacao_Acumulada'].max()
             if pd.isna(pico_pessoas): pico_pessoas = 0
-            col4.metric("Pico de Ocupação Real", f"{int(pico_pessoas)} Pessoas")
+            col4.metric("Pico de Ocupação", f"{int(pico_pessoas)} Pessoas")
         else:
             col4.metric("Pico de Ocupação", "N/A")
 
         st.divider()
 
-        if not df_ocupacao.empty:
-            st.markdown("#### 👥 Comportamento da Ocupação")
-            fig_oc = px.line(df_ocupacao, x='DataHora', y='Ocupacao_Acumulada', title='Fluxo de Pessoas (Acumulado por Dia)')
-            st.plotly_chart(fig_oc, use_container_width=True)
-        
-        st.divider()
-
-        # Gauge & Info Técnica
-        c_gauge, c_info = st.columns([1, 1.5])
+        # Gauge & Comparação Automática
+        c_gauge, c_comp = st.columns([1, 1.5])
         
         with c_gauge:
             fig_gauge = go.Figure(go.Indicator(
                 mode = "gauge+number",
                 value = total_demanda_pico_kw,
                 domain = {'x': [0, 1], 'y': [0, 1]},
-                title = {'text': "Utilização da Infraestrutura (kW)"},
+                title = {'text': "Infraestrutura (kW)"},
                 gauge = {
                     'axis': {'range': [None, total_instalado_kw]},
                     'bar': {'color': "rgba(31, 119, 180, 0.8)"}, 
@@ -231,119 +237,108 @@ if not df_raw.empty:
                 }
             ))
             st.plotly_chart(fig_gauge, use_container_width=True)
-            kVA_calc = total_demanda_pico_kw / 0.92
-            st.info(f"Transformador Recomendado: **{kVA_calc:.0f} kVA** (FP 0.92).")
-        
-        with c_info:
-            st.markdown("#### Composição do Custo de Demanda")
-            df_demanda_cat = df_raw.groupby('Categoria_Macro')[['Potencia_Instalada_kW', 'Demanda_Estimada_kW']].sum().reset_index()
-            df_demanda_cat['Fator Demanda'] = df_demanda_cat['Categoria_Macro'].map(fatores_demanda)
+
+        with c_comp:
+            st.markdown("### 🔎 Comparação: Uso Real vs Capacidade")
+            potencia_media_kw = consumo_total_kwh / 720 
+            pct_uso_demanda = (potencia_media_kw / total_demanda_pico_kw) * 100 if total_demanda_pico_kw > 0 else 0
+            pct_uso_instalada = (potencia_media_kw / total_instalado_kw) * 100 if total_instalado_kw > 0 else 0
+
+            k_cmp1, k_cmp2 = st.columns(2)
+            k_cmp1.metric("Potência Média (Uso Real)", f"{potencia_media_kw:,.1f} kW")
+            k_cmp2.metric("Uso vs Pico Estimado", f"{pct_uso_demanda:.1f}%")
+
+            if pct_uso_demanda < 70:
+                st.success("✅ O uso real está confortável dentro do dimensionamento.")
+            elif pct_uso_demanda < 100:
+                st.info("⚠️ O uso real está próximo do pico estimado.")
+            else:
+                st.warning("🚨 O uso REAL ultrapassa o pico estimado.")
+            
+            # Tabela Resumida
+            df_demanda_cat = df_raw.groupby('Categoria_Macro')[['Demanda_Estimada_kW']].sum().reset_index()
             df_demanda_cat['Custo Demanda (R$)'] = df_demanda_cat['Demanda_Estimada_kW'] * tarifa_kw_demanda
-            df_demanda_cat = df_demanda_cat.sort_values('Demanda_Estimada_kW', ascending=False)
-            st.dataframe(
-                df_demanda_cat.style.format({
-                    "Potencia_Instalada_kW": "{:.1f} kW",
-                    "Demanda_Estimada_kW": "{:.1f} kW",
-                    "Fator Demanda": "{:.2f}",
-                    "Custo Demanda (R$)": "R$ {:.2f}"
-                }), use_container_width=True, hide_index=True
-            )
+            st.dataframe(df_demanda_cat.sort_values('Demanda_Estimada_kW', ascending=False), use_container_width=True, hide_index=True)
 
-        st.divider()
-
-        # ============================================================
-        # 🔍 ADIÇÃO: Comparação entre Pico Estimado (kW) e Consumo Real (kWh)
-        # ============================================================
-        st.markdown("### 🔎 Comparação: Uso Real vs Capacidade Estimada")
-
-        # Potência média equivalente (convertendo kWh -> kW)
-        potencia_media_kw = consumo_total_kwh / 720   # 30 dias * 24 h = 720 h
-
-        # Percentuais de utilização
-        pct_uso_demanda = (potencia_media_kw / total_demanda_pico_kw) * 100 if total_demanda_pico_kw > 0 else 0
-        pct_uso_instalada = (potencia_media_kw / total_instalado_kw) * 100 if total_instalado_kw > 0 else 0
-
-        c_cmp1, c_cmp2, c_cmp3 = st.columns(3)
-
-        c_cmp1.metric(
-            "Potência Média Equivalente",
-            f"{potencia_media_kw:,.1f} kW",
-            help="Convertido do consumo mensal total (kWh → kW médio)."
-        )
-
-        c_cmp2.metric(
-            "Uso vs Pico Estimado",
-            f"{pct_uso_demanda:.1f}%",
-            help=f"Pico Estimado = {total_demanda_pico_kw:.1f} kW"
-        )
-
-        c_cmp3.metric(
-            "Uso vs Potência Instalada",
-            f"{pct_uso_instalada:.1f}%",
-            help=f"Total Instalado = {total_instalado_kw:.1f} kW"
-        )
-
-        # Interpretação automática
-        if pct_uso_demanda < 70:
-            st.success("✅ O uso real está BEM dentro do limite do dimensionamento.")
-        elif pct_uso_demanda < 100:
-            st.info("⚠️ O uso real está dentro do limite, mas próximo do pico estimado.")
-        else:
-            st.warning("🚨 O uso REAL ultrapassa o pico estimado — revise a demanda contratada.")
-
-    # --- ABA 2: CONSUMO (CUSTO VARIÁVEL) ---
+    # --- ABA 2: CONSUMO ---
     with tab2:
-        st.subheader("Consumo de Energia (Custo Variável de Uso)")
-        
-        # SOMA DOS DOIS CUSTOS PARA VISÃO GERAL
+        st.subheader("Consumo de Energia (Custo Variável)")
         fatura_total_estimada = custo_demanda_fixo + custo_total_consumo
         
         k1, k2, k3 = st.columns(3)
-        k1.metric("Consumo Mensal Total", f"{consumo_total_kwh:,.0f} kWh")
-        k2.metric("Custo Variável (Energia)", f"R$ {custo_total_consumo:,.2f}", help="Valor pago pelo que foi consumido (kWh)")
-        k3.metric("Fatura Total Estimada", f"R$ {fatura_total_estimada:,.2f}", 
-                  delta="Demanda (Fixo) + Consumo (Variável)", delta_color="off",
-                  help="Soma do custo fixo da Aba 1 com o custo variável desta aba.")
+        k1.metric("Consumo Mensal", f"{consumo_total_kwh:,.0f} kWh")
+        k2.metric("Custo Variável", f"R$ {custo_total_consumo:,.2f}")
+        k3.metric("Fatura Total Estimada", f"R$ {fatura_total_estimada:,.2f}", delta="Fixo + Variável", delta_color="off")
         
         st.divider()
-        c_bar, c_pie = st.columns([2, 1])
-        with c_bar:
-            fig_bar = px.bar(
-                df_raw.groupby('Categoria_Macro')['Consumo_Mensal_kWh'].sum().reset_index(),
-                x='Categoria_Macro', y='Consumo_Mensal_kWh', color='Categoria_Macro', 
-                title="Consumo por Categoria (kWh)", text_auto='.2s'
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
-            
-        with c_pie:
-            st.markdown("**Representatividade no Custo Variável**")
-            fig_pie = px.pie(df_raw, values='Custo_Consumo_R$', names='Categoria_Macro', hole=0.4)
-            st.plotly_chart(fig_pie, use_container_width=True)
+        fig_bar = px.bar(
+            df_raw.groupby('Categoria_Macro')['Consumo_Mensal_kWh'].sum().reset_index(),
+            x='Categoria_Macro', y='Consumo_Mensal_kWh', color='Categoria_Macro', 
+            title="Consumo por Categoria (kWh)", text_auto='.2s'
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
 
-    # --- ABA 3: EFICIÊNCIA & ROI ---
+    # --- ABA 3: VIABILIDADE (ATUALIZADA) ---
     with tab3:
-        st.subheader("Estudo de Viabilidade (Retrofit)")
+        st.subheader("Estudo de Viabilidade e Redução de Custos")
         
-        col_input, col_result = st.columns([1, 2])
+        col_input, col_graf = st.columns([1, 2])
+        
         with col_input:
-            st.markdown("##### Parâmetros do Projeto")
-            investimento = st.number_input("Verba Disponível (R$)", 50000.0, step=5000.0)
-            st.caption("Focando em troca de iluminação (LED) e Ar Condicionado (Inverter).")
+            st.markdown("#### ⚙️ Parâmetros do Projeto")
+            investimento = st.number_input("Verba para Investimento (R$)", 50000.0, step=5000.0)
+            st.info("""
+            **Propostas Automáticas:**
+            1. Substituição de Iluminação por **LED** (-60% consumo luz).
+            2. Ar Condicionado **Inverter** (-40% consumo clima).
+            3. Ajuste de Contrato de Demanda (Evitar multas).
+            """)
         
-        with col_result:
-            eco_potencial_kwh = (consumo_total_kwh * 0.4 * 0.4) + (consumo_total_kwh * 0.3 * 0.6)
-            eco_financeira = eco_potencial_kwh * tarifa_kwh
-            payback = investimento / eco_financeira if eco_financeira > 0 else 0
+        # Cálculos de Economia
+        eco_potencial_kwh = (consumo_total_kwh * 0.4 * 0.4) + (consumo_total_kwh * 0.3 * 0.6) # Estimativa
+        eco_financeira = eco_potencial_kwh * tarifa_kwh
+        novo_custo_consumo = custo_total_consumo - eco_financeira
+        
+        # Comparativo Gráfico
+        with col_graf:
+            st.markdown("#### 📊 Comparativo: Atual vs Econômico")
             
-            st.markdown("##### Resultados Projetados")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Economia Mensal Estimada", f"R$ {eco_financeira:,.2f}")
-            m2.metric("Redução de Carga (Alívio Demanda)", f"{total_demanda_pico_kw * 0.15:,.1f} kW")
-            m3.metric("Payback Simples", f"{payback:.1f} meses")
+            # Dados para o gráfico
+            dados_comp = pd.DataFrame({
+                'Cenário': ['Cenário Atual', 'Cenário Eficiente'],
+                'Custo Mensal (R$)': [custo_total_consumo, novo_custo_consumo],
+                'Cor': ['#EF553B', '#00CC96'] # Vermelho, Verde
+            })
             
-            if payback < 12: st.success("✅ Alta Viabilidade")
-            elif payback < 36: st.info("⚠️ Viabilidade Média")
-            else: st.warning("❌ Payback Longo")
+            fig_comp = px.bar(
+                dados_comp, x='Cenário', y='Custo Mensal (R$)', 
+                color='Cenário', color_discrete_sequence=['#EF553B', '#00CC96'],
+                text='Custo Mensal (R$)'
+            )
+            fig_comp.update_traces(texttemplate='R$ %{text:,.2f}', textposition='outside')
+            fig_comp.update_layout(showlegend=False, height=300)
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+        st.divider()
+        
+        # Resultados Financeiros
+        payback = investimento / eco_financeira if eco_financeira > 0 else 0
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Economia Mensal Gerada", f"R$ {eco_financeira:,.2f}", delta="Dinheiro economizado")
+        m2.metric("Redução na Conta (%)", f"{(eco_financeira/custo_total_consumo)*100:.1f}%")
+        
+        if payback < 18:
+            cor_delta = "normal" # Verde
+            txt_payback = "✅ Retorno Rápido"
+        elif payback < 36:
+            cor_delta = "off" # Cinza
+            txt_payback = "⚠️ Retorno Médio"
+        else:
+            cor_delta = "inverse" # Vermelho
+            txt_payback = "❌ Retorno Longo"
+            
+        m3.metric("Payback (Retorno)", f"{payback:.1f} meses", delta=txt_payback, delta_color=cor_delta)
 
     # --- ABA 4: DETALHE SALAS ---
     with tab4:
@@ -358,7 +353,7 @@ if not df_raw.empty:
                 df_a = df_raw[df_raw['num_andar'] == sel_andar]
                 custo_andar = df_a['Custo_Consumo_R$'].sum()
                 st.metric(f"Custo Total - {sel_andar}", f"R$ {custo_andar:,.2f}")
-                st.caption("Salas com maior consumo neste andar:")
+                st.caption("Maiores consumidores:")
                 df_a_agrupado = df_a.groupby('Id_sala')[['Custo_Consumo_R$']].sum().reset_index().sort_values('Custo_Consumo_R$', ascending=False)
                 st.dataframe(df_a_agrupado.style.format({"Custo_Consumo_R$": "R$ {:.2f}"}), use_container_width=True, hide_index=True)
 
@@ -370,7 +365,7 @@ if not df_raw.empty:
                 df_s = df_raw[df_raw['Id_sala'] == sel_sala]
                 custo_sala = df_s['Custo_Consumo_R$'].sum()
                 st.metric(f"Custo Total - {sel_sala}", f"R$ {custo_sala:,.2f}")
-                st.caption("Equipamentos nesta sala:")
+                st.caption("Lista de equipamentos:")
                 st.dataframe(
                     df_s[['des_nome_equipamento', 'Quant', 'Potencia_Instalada_kW', 'Custo_Consumo_R$']].sort_values('Custo_Consumo_R$', ascending=False),
                     use_container_width=True, hide_index=True
@@ -378,4 +373,3 @@ if not df_raw.empty:
 
 else:
     st.info("Aguardando dados... Se o erro persistir, verifique a conexão com o GitHub.")
-
