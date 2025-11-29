@@ -130,7 +130,7 @@ if not df_raw.empty:
     # --- 2. SIDEBAR E PREMISSAS ---
     with st.sidebar:
         st.header("⚙️ Premissas Operacionais")
-        st.caption("Versão: 4.4 (Gráfico Detalhado)")
+        st.caption("Versão: 4.5 (Fix Variável Salas)")
         
         with st.expander("Horas de Uso (Padrão)", expanded=True):
             horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
@@ -142,7 +142,10 @@ if not df_raw.empty:
         
         st.divider()
         st.markdown("🕒 **Salas 24h**")
-        lista_salas = sorted(df_raw['Id_sala'].unique().astype(str))
+        
+        # Definição da variável lista_salas_unicas ANTES de ser usada
+        lista_salas_unicas = sorted(df_raw['Id_sala'].unique().astype(str))
+        
         salas_24h = st.multiselect(
             "Selecione salas que operam 24h (ex: Servidores, Segurança):",
             options=lista_salas_unicas,
@@ -300,7 +303,7 @@ if not df_raw.empty:
     with tab6:
         st.subheader("Simulador de Projeto (ROI)")
         c1, c2 = st.columns(2)
-        invest = c1.number_input("Investimento (R$)", value=100000.0, step=5000.0)
+        invest = c1.number_input("Investimento Disponível (R$)", value=100000.0, step=5000.0)
         led_custo = c2.number_input("Custo LED (R$)", 25.0)
         ar_custo = c2.number_input("Custo Ar Inverter (R$)", 3500.0)
         pc_custo = c2.number_input("Custo Mini PC (R$)", 2800.0)
@@ -322,10 +325,17 @@ if not df_raw.empty:
         
         st.info(f"Plano Sugerido: {n_luz} Lâmpadas + {n_ar} Ares + {n_pc} PCs")
         
-        eco_proj = (n_luz * 0.018 * 10 * 22 * tarifa_kwh) + (n_ar * 0.6 * 8 * 22 * tarifa_kwh) + (n_pc * 0.1 * 9 * 22 * tarifa_kwh)
+        # Payback
+        eco_l = n_luz * (0.018 * 10 * 22 * tarifa_kwh) # Exemplo de eco unitária
+        eco_a = n_ar * (0.600 * 8 * 22 * tarifa_kwh)
+        eco_p = n_pc * (0.100 * 9 * 22 * tarifa_kwh)
+        total_eco_mes = eco_l + eco_a + eco_p
         
-        if eco_proj > 0: st.metric("Payback Estimado", f"{(invest/eco_proj):.1f} meses")
-        else: st.warning("Sem economia gerada.")
+        if total_eco_mes > 0:
+            payback = invest / total_eco_mes
+            st.metric("Payback Estimado", f"{payback:.1f} meses")
+        else:
+            st.warning("Investimento insuficiente para gerar economia.")
 
 else:
     st.warning("Aguardando carregamento dos dados...")
