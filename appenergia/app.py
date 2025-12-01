@@ -12,7 +12,7 @@ st.set_page_config(page_title="Dashboard de Energia (Dimensionamento)", layout="
 st.title("⚡ Gestão de Energia — Dimensionamento e Consumo")
 st.markdown("""
 Painel completo para **dimensionamento de demanda**, **consumo**, 
-**análise de ocupação**, **eficiência** e **viabilidade econômica**.
+**análise de ocupação**, **eficiência** e **viabilidade econômica**.""")
 
 # ---------------------------------------------------
 # 1. CARREGAMENTO DOS DADOS
@@ -606,4 +606,5 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
 
 else:
     st.warning("Carregando dados... Verifique sua conexão.")
+
 
