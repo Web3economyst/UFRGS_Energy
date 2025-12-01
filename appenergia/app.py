@@ -7,9 +7,9 @@ import numpy as np
 # ---------------------------------------------------
 # CONFIGURAÇÃO INICIAL
 # ---------------------------------------------------
-st.set_page_config(page_title="Dashboard de Energia (Dimensionamento)", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Dashboard de Energia", layout="wide", page_icon="⚡")
 
-st.title("⚡ Gestão de Energia — Dimensionamento e Consumo")
+st.title("⚡ Eficiência Energética — Prédio da Reitoria")
 st.markdown("""
 Painel completo para **dimensionamento de demanda**, **consumo**, 
 **análise de ocupação**, **eficiência** e **viabilidade econômica**.""")
@@ -606,6 +606,7 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
 
 else:
     st.warning("Carregando dados... Verifique sua conexão.")
+
 
 
 
