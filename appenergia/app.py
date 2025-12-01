@@ -45,11 +45,12 @@ def load_data():
         else:
             df_inv['Id_sala'] = 'Não Identificado'
         
-        # Garantindo que a coluna ID seja string para agrupamento correto
-        if 'ID' in df_inv.columns:
-            df_inv['ID'] = df_inv['ID'].astype(str).replace(['nan','NaN',''], 'Sem ID')
+        # Tratamento da coluna Setor (Substituindo lógica anterior de ID)
+        if 'Setor' in df_inv.columns:
+            df_inv['Setor'] = df_inv['Setor'].astype(str).str.strip().replace(['nan','NaN',''], 'Não Identificado')
         else:
-            df_inv['ID'] = 'Sem ID'
+            # Caso a coluna não exista no CSV ainda, cria um placeholder para não quebrar
+            df_inv['Setor'] = 'Não Identificado'
 
         # Conversão BTU → Watts
         def converter_watts(row):
@@ -142,13 +143,11 @@ if not df_raw.empty:
     # 3. CÁLCULOS TÉCNICOS
     # ---------------------------------------------------
 
-    # AJUSTE SOLICITADO: Função agrupar aprimorada para capturar Eletrodomésticos corretamente
     def agrupar(cat):
         c = str(cat).upper().strip()
         if "CLIM" in c or "AR" in c: return "Climatização"
         if "ILUM" in c or "LÂMP" in c: return "Iluminação"
         if "COMP" in c or "MONIT" in c or "INFORM" in c: return "Informática"
-        # Ajuste para garantir que capture qualquer variação de eletro
         if "ELETRO" in c or "DOMÉSTICO" in c or "COPA" in c or "COZINHA" in c: return "Eletrodomésticos"
         if "ELEV" in c: return "Elevadores"
         if "BOMB" in c: return "Bombas"
@@ -166,7 +165,7 @@ if not df_raw.empty:
             if cat == "Climatização": h = horas_ar
             elif cat == "Iluminação": h = horas_luz
             elif cat == "Informática": h = horas_pc
-            elif cat == "Eletrodomésticos": h = horas_eletro # Agora vinculado corretamente
+            elif cat == "Eletrodomésticos": h = horas_eletro
             else: h = horas_outros
             dias = dias_mes
 
@@ -498,7 +497,7 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
 
 
     # ---------------------------------------------------
-    # TAB 5 — DETALHES ANDAR / SALA (COM NOVAS ADIÇÕES)
+    # TAB 5 — DETALHES ANDAR / SALA
     # ---------------------------------------------------
     with tab4:
         st.subheader("🏢 Análise detalhada — Andares e Salas")
@@ -557,15 +556,16 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         st.divider()
 
         # ---------------------------
-        # AJUSTE SOLICITADO: UNIDADES ADMINISTRATIVAS (ID)
+        # AJUSTE SOLICITADO: CONSUMO POR SETOR (Anteriormente ID)
         # ---------------------------
-        st.markdown("### 🏢 Consumo por Unidade Administrativa (ID)")
+        st.markdown("### 🏢 Consumo por Setor (Unidade Administrativa)")
         
-        df_admin = df_raw.groupby("ID")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
-        df_admin = df_admin.sort_values("Custo_Consumo_R$", ascending=False)
+        # Agora agrupando pela coluna 'Setor' conforme solicitado
+        df_setor = df_raw.groupby("Setor")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
+        df_setor = df_setor.sort_values("Custo_Consumo_R$", ascending=False)
         
         st.dataframe(
-            df_admin.style.format({
+            df_setor.style.format({
                 "Consumo_Mensal_kWh": "{:,.0f} kWh",
                 "Custo_Consumo_R$": "R$ {:,.2f}"
             }),
