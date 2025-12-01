@@ -357,7 +357,7 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
 
         st.divider()
 
-        st.markdown("### 🔥 Economia por Categoria")
+        st.markdown("###  Economia por Categoria")
         st.dataframe(
             resumo.sort_values("Economia_R$", ascending=False).style.format({
                 "Consumo_Mensal_kWh": "{:,.0f}",
@@ -405,7 +405,7 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         # PARÂMETROS DE INVESTIMENTO
         # ------------------------------
         with col_l:
-            st.markdown("### 🎯 Parâmetros do Projeto")
+            st.markdown("### Parâmetros do Projeto")
 
             investimento = st.number_input(
                 "Orçamento disponível (R$):",
@@ -426,7 +426,7 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         # ALOCAÇÃO OTIMIZADA DA VERBA
         # ------------------------------
         with col_r:
-            st.markdown("### 🔁 Distribuição automática da verba")
+            st.markdown("### Distribuição automática da verba")
 
             # Quantidades existentes no inventário
             qtd_luz = df_raw[df_raw["Categoria_Macro"] == "Iluminação"]["Quant"].sum()
@@ -495,7 +495,7 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
     # TAB 5 — DETALHES ANDAR / SALA
     # ---------------------------------------------------
     with tab4:
-        st.subheader("🏢 Análise detalhada — Andares e Salas")
+        st.subheader("Análise detalhada")
 
         col_a, col_s = st.columns(2)
 
@@ -573,7 +573,7 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         # ---------------------------
         # AJUSTE SOLICITADO: AQUECER / ESFRIAR
         # ---------------------------
-        st.markdown("### ❄️🔥 Gasto Específico — Aquecer e Esfriar")
+        st.markdown("### Gasto relacionada a aparelhos que aquecem e Esfriam")
         
         # Filtro pelos equipamentos que contêm palavras chaves de climatização no nome genérico
         keywords_clim = ['AR', 'COND', 'SPLIT', 'AQUEC', 'VENT', 'CLIMAT']
@@ -606,5 +606,6 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
 
 else:
     st.warning("Carregando dados... Verifique sua conexão.")
+
 
 
