@@ -15,9 +15,7 @@ Painel completo para **dimensionamento de demanda**, **consumo**,
 **análise de ocupação**, **eficiência** e **viabilidade econômica**.
 
 Inclui:
-- Cálculo realista com **sazonalidade avançada**  
-- Comparação entre **Pico de Demanda (kW)** e **Uso Real (kWh)**  
-- Transformador recomendado  
+- Cálculo realista com **sazonalidade avançada** - Comparação entre **Pico de Demanda (kW)** e **Uso Real (kWh)** - Transformador recomendado  
 - Dimensionamento de salas e andares  
 """)
 
@@ -46,6 +44,12 @@ def load_data():
             df_inv['Id_sala'] = df_inv['Id_sala'].astype(str).replace(['nan','NaN',''], 'Não Identificado')
         else:
             df_inv['Id_sala'] = 'Não Identificado'
+        
+        # Garantindo que a coluna ID seja string para agrupamento correto
+        if 'ID' in df_inv.columns:
+            df_inv['ID'] = df_inv['ID'].astype(str).replace(['nan','NaN',''], 'Sem ID')
+        else:
+            df_inv['ID'] = 'Sem ID'
 
         # Conversão BTU → Watts
         def converter_watts(row):
@@ -138,12 +142,14 @@ if not df_raw.empty:
     # 3. CÁLCULOS TÉCNICOS
     # ---------------------------------------------------
 
+    # AJUSTE SOLICITADO: Função agrupar aprimorada para capturar Eletrodomésticos corretamente
     def agrupar(cat):
-        c = str(cat).upper()
+        c = str(cat).upper().strip()
         if "CLIM" in c or "AR" in c: return "Climatização"
         if "ILUM" in c or "LÂMP" in c: return "Iluminação"
-        if "COMP" in c or "MONIT" in c: return "Informática"
-        if "ELETRO" in c: return "Eletrodomésticos"
+        if "COMP" in c or "MONIT" in c or "INFORM" in c: return "Informática"
+        # Ajuste para garantir que capture qualquer variação de eletro
+        if "ELETRO" in c or "DOMÉSTICO" in c or "COPA" in c or "COZINHA" in c: return "Eletrodomésticos"
         if "ELEV" in c: return "Elevadores"
         if "BOMB" in c: return "Bombas"
         return "Outros"
@@ -160,7 +166,7 @@ if not df_raw.empty:
             if cat == "Climatização": h = horas_ar
             elif cat == "Iluminação": h = horas_luz
             elif cat == "Informática": h = horas_pc
-            elif cat == "Eletrodomésticos": h = horas_eletro
+            elif cat == "Eletrodomésticos": h = horas_eletro # Agora vinculado corretamente
             else: h = horas_outros
             dias = dias_mes
 
@@ -326,12 +332,6 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         # --------------------------
         # MODELO DE EFICIÊNCIA REAL
         # --------------------------
-        # Reduções típicas comprovadas:
-        # LED: 55%–70%
-        # Ar Inverter: 25%–45%
-        # TI moderna: 30%–50%
-        # Eletrodomésticos novos: 15%–30%
-
         eficiencia_params = {
             "Iluminação": 0.60,          # 60% de redução com LED
             "Climatização": 0.35,        # 35% com inverter
@@ -425,8 +425,7 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
             custo_pc = st.number_input("Mini PC (R$)", value=2800.0)
 
             st.info("""
-            📌 **Ordem de prioridade automática:**  
-            1) Iluminação → 2) Climatização → 3) Informática  
+            📌 **Ordem de prioridade automática:** 1) Iluminação → 2) Climatização → 3) Informática  
             """)
 
         # ------------------------------
@@ -499,7 +498,7 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
 
 
     # ---------------------------------------------------
-    # TAB 5 — DETALHES ANDAR / SALA
+    # TAB 5 — DETALHES ANDAR / SALA (COM NOVAS ADIÇÕES)
     # ---------------------------------------------------
     with tab4:
         st.subheader("🏢 Análise detalhada — Andares e Salas")
@@ -554,6 +553,61 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
                 use_container_width=True,
                 hide_index=True
             )
+        
+        st.divider()
+
+        # ---------------------------
+        # AJUSTE SOLICITADO: UNIDADES ADMINISTRATIVAS (ID)
+        # ---------------------------
+        st.markdown("### 🏢 Consumo por Unidade Administrativa (ID)")
+        
+        df_admin = df_raw.groupby("ID")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
+        df_admin = df_admin.sort_values("Custo_Consumo_R$", ascending=False)
+        
+        st.dataframe(
+            df_admin.style.format({
+                "Consumo_Mensal_kWh": "{:,.0f} kWh",
+                "Custo_Consumo_R$": "R$ {:,.2f}"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.divider()
+
+        # ---------------------------
+        # AJUSTE SOLICITADO: AQUECER / ESFRIAR
+        # ---------------------------
+        st.markdown("### ❄️🔥 Gasto Específico — Aquecer e Esfriar")
+        
+        # Filtro pelos equipamentos que contêm palavras chaves de climatização no nome genérico
+        keywords_clim = ['AR', 'COND', 'SPLIT', 'AQUEC', 'VENT', 'CLIMAT']
+        
+        # Função auxiliar para filtrar
+        def is_clim(nome):
+            n = str(nome).upper()
+            return any(k in n for k in keywords_clim)
+        
+        df_clim = df_raw[df_raw['des_nome_generico_equipamento'].apply(is_clim)].copy()
+        
+        if not df_clim.empty:
+            df_clim_g = df_clim.groupby("des_nome_generico_equipamento")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
+            df_clim_g = df_clim_g.sort_values("Custo_Consumo_R$", ascending=False)
+            
+            c_clim1, c_clim2 = st.columns(2)
+            c_clim1.metric("Custo Total Climatização", f"R$ {df_clim['Custo_Consumo_R$'].sum():,.2f}")
+            c_clim2.metric("Consumo Total Climatização", f"{df_clim['Consumo_Mensal_kWh'].sum():,.0f} kWh")
+
+            st.dataframe(
+                df_clim_g.style.format({
+                    "Consumo_Mensal_kWh": "{:,.0f} kWh",
+                    "Custo_Consumo_R$": "R$ {:,.2f}"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("Nenhum equipamento de aquecer/esfriar identificado com os termos comuns (Ar, Split, Aquecedor, Ventilador).")
 
 else:
     st.warning("Carregando dados... Verifique sua conexão.")
