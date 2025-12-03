@@ -41,11 +41,10 @@ def load_data():
         else:
             df_inv['Id_sala'] = 'Não Identificado'
         
-        # Tratamento da coluna Setor (Substituindo lógica anterior de ID)
+        # Tratamento da coluna Setor
         if 'Setor' in df_inv.columns:
             df_inv['Setor'] = df_inv['Setor'].astype(str).str.strip().replace(['nan','NaN',''], 'Não Identificado')
         else:
-            # Caso a coluna não exista no CSV ainda, cria um placeholder para não quebrar
             df_inv['Setor'] = 'Não Identificado'
 
         # Conversão BTU → Watts
@@ -506,11 +505,10 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         with col_a:
             st.markdown("### 🏬 Andares")
 
-            # <--- ALTERAÇÃO 1: CÁLCULO DA MÉDIA DE APARELHOS POR ANDAR
+            # Média de aparelhos por andar (GLOBAL)
             qtd_por_andar = df_raw.groupby('num_andar')['Quant'].sum()
             media_aparelhos = qtd_por_andar.mean()
-            st.metric("Média de Aparelhos por Andar (Global)", f"{media_aparelhos:,.0f} un.")
-            # ---------------------------------------------------------
+            st.metric("Média de Aparelhos por Andar", f"{media_aparelhos:,.0f} un.")
 
             lista_andares = sorted(df_raw['num_andar'].unique())
             andar_sel = st.selectbox("Selecione o andar:", lista_andares)
@@ -562,6 +560,12 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         # ---------------------------
         st.markdown("### 🏢 Consumo por Setor (Unidade Administrativa)")
         
+        # <--- NOVA MÉTRICA ADICIONADA: MÉDIA POR SETOR --->
+        qtd_por_setor = df_raw.groupby('Setor')['Quant'].sum()
+        media_aparelhos_setor = qtd_por_setor.mean()
+        st.metric("Média de Aparelhos por Unidade Adm.", f"{media_aparelhos_setor:,.0f} un.")
+        # <------------------------------------------------>
+
         df_setor = df_raw.groupby("Setor")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
         df_setor = df_setor.sort_values("Custo_Consumo_R$", ascending=False)
         
@@ -577,12 +581,11 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         st.divider()
 
         # ---------------------------
-        # ALTERAÇÃO 2: LISTA ESPECÍFICA DE APARELHOS AQUECIMENTO/RESFRIAMENTO + COZINHA
+        # GASTOS APARELHOS TÉRMICOS / COZINHA (LISTA ESPECÍFICA)
         # ---------------------------
         st.markdown("### 🔥❄️ Gasto Relacionado a Aparelhos Térmicos e de Cozinha")
         st.caption("Filtro: Ar Condicionado, Geladeira, Frigobar, Bebedouro, Microondas, Cafeteira, etc.")
         
-        # Lista definida pelo usuário
         target_keywords = [
             "AR CONDICIONADO", "GELADEIRA", "FRIGOBAR", "REFRIGERADOR", 
             "BEBEDOURO", "DESUMIDIFICADOR", "VENTILADOR", "MICROONDAS", 
@@ -590,12 +593,10 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
             "AQUECEDOR", "FOGAREIRO"
         ]
         
-        # Função auxiliar de filtro (busca parcial, uppercase)
         def is_target_appliance(nome):
             n = str(nome).upper()
             return any(k in n for k in target_keywords)
         
-        # Filtragem usando a lista específica
         df_clim = df_raw[df_raw['des_nome_generico_equipamento'].apply(is_target_appliance)].copy()
         
         if not df_clim.empty:
