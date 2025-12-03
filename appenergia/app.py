@@ -507,27 +507,61 @@ if not df_raw.empty:
 
         col_a, col_s = st.columns(2)
 
-        # AGORA COL_A É "SETOR" (Unidade Administrativa)
+        # AGORA COL_A É "SETOR" (Unidade Administrativa) COM DETALHAMENTO
         with col_a:
-            st.markdown("### 🏢 Consumo por Setor (Unidade Administrativa)")
+            st.markdown("### 🏢 Consumo por Setor")
             
+            # Global Stats (Mantido)
             qtd_por_setor = df_raw.groupby('Setor')['Quant'].sum()
             media_aparelhos_setor = qtd_por_setor.mean()
             st.metric("Média de Aparelhos por Unidade Adm.", formatar_br(media_aparelhos_setor, sufixo=" un.", decimais=0))
 
-            df_setor = df_raw.groupby("Setor")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
-            df_setor = df_setor.sort_values("Custo_Consumo_R$", ascending=False)
+            # Interatividade de Drill-down
+            st.markdown("#### 🔍 Detalhar Setor")
+            lista_setores = sorted(df_raw['Setor'].unique())
+            setor_sel = st.selectbox("Selecione a Unidade Administrativa:", lista_setores, key="sel_setor_drill")
+
+            # Filtra dados pelo setor selecionado
+            df_sel_setor = df_raw[df_raw['Setor'] == setor_sel]
             
+            custo_setor = df_sel_setor["Custo_Consumo_R$"].sum()
+            consumo_setor = df_sel_setor["Consumo_Mensal_kWh"].sum()
+            
+            c_s1, c_s2 = st.columns(2)
+            c_s1.metric("Custo do Setor", formatar_br(custo_setor, prefixo="R$ "))
+            c_s2.metric("Consumo do Setor", formatar_br(consumo_setor, sufixo=" kWh", decimais=0))
+
+            st.caption(f"Salas que compõem o setor: **{setor_sel}**")
+            
+            # Agrupa por SALA dentro do SETOR selecionado
+            df_rooms_sector = df_sel_setor.groupby("Id_sala")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
+            df_rooms_sector = df_rooms_sector.sort_values("Custo_Consumo_R$", ascending=False)
+
             st.dataframe(
-                df_setor.style.format({
+                df_rooms_sector.style.format({
                     "Consumo_Mensal_kWh": lambda x: formatar_br(x, sufixo=" kWh", decimais=0),
                     "Custo_Consumo_R$": lambda x: formatar_br(x, prefixo="R$ ")
                 }),
                 use_container_width=True, hide_index=True
             )
 
+            st.divider()
+
+            # Ranking Geral em Expander (para não poluir a tela)
+            with st.expander("📊 Ver Ranking Geral de Todos os Setores"):
+                df_setor_all = df_raw.groupby("Setor")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
+                df_setor_all = df_setor_all.sort_values("Custo_Consumo_R$", ascending=False)
+                
+                st.dataframe(
+                    df_setor_all.style.format({
+                        "Consumo_Mensal_kWh": lambda x: formatar_br(x, sufixo=" kWh", decimais=0),
+                        "Custo_Consumo_R$": lambda x: formatar_br(x, prefixo="R$ ")
+                    }),
+                    use_container_width=True, hide_index=True
+                )
+
         with col_s:
-            st.markdown("### 🚪 Salas")
+            st.markdown("### 🚪 Salas (Geral)")
 
             lista_salas = sorted(df_raw['Id_sala'].unique())
             sala_sel = st.selectbox("Selecione a sala:", lista_salas)
