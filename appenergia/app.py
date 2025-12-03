@@ -109,17 +109,33 @@ if not df_raw.empty:
         st.subheader("🌦️ Estação / Sazonalidade")
         periodo = st.radio("Selecione:", ["Verão (Alto Consumo)", "Inverno/Ameno (Baixo Consumo)"])
 
-        tarifa_base = 0.65
         if "Verão" in periodo:
             fator_sazonal_clima = 1.30
-            tarifa_sugerida = 0.72
+            # Sugestão de tarifas mais altas no verão (simulação)
+            sugestao_ponta = 1.85
+            sugestao_fora = 0.65
         else:
             fator_sazonal_clima = 0.60
-            tarifa_sugerida = 0.58
+            sugestao_ponta = 1.60
+            sugestao_fora = 0.55
 
-        st.subheader("💰 Tarifas")
-        tarifa_kwh = st.number_input("Tarifa Consumo (R$/kWh)", value=tarifa_sugerida, format="%.2f")
+        # --- ALTERAÇÃO SOLICITADA: DIVISÃO DE TARIFAS ---
+        st.subheader("💰 Tarifas (R$/kWh)")
+        c_tar1, c_tar2 = st.columns(2)
+        with c_tar1:
+            tarifa_ponta = st.number_input("Ponta", value=sugestao_ponta, format="%.2f", help="Horário de pico (ex: 18h-21h)")
+        with c_tar2:
+            tarifa_fora_ponta = st.number_input("Fora Ponta", value=sugestao_fora, format="%.2f", help="Demais horários")
+        
+        # Cálculo da Tarifa Média Composta (50% Ponta / 50% Fora)
+        # Lógica: (kWh * 0.5 * TarifaPonta) + (kWh * 0.5 * TarifaFora) 
+        # Simplifica para: kWh * ((TarifaPonta + TarifaFora) / 2)
+        tarifa_media_calculada = (tarifa_ponta * 0.5) + (tarifa_fora_ponta * 0.5)
+        
+        st.caption(f"Tarifa Média (Mix 50/50): **R$ {tarifa_media_calculada:.2f}/kWh**")
+        
         tarifa_kw_demanda = st.number_input("Tarifa Demanda (R$/kW)", value=40.0)
+        # ------------------------------------------------
 
         st.divider()
         st.subheader("🕒 Salas 24h")
@@ -171,7 +187,11 @@ if not df_raw.empty:
         return cons
 
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(consumo, axis=1)
-    df_raw['Custo_Consumo_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_kwh
+    
+    # --- APLICAÇÃO DA NOVA LÓGICA DE CUSTO ---
+    # Custo = Consumo * Tarifa Média (que representa 50% Ponta + 50% Fora)
+    df_raw['Custo_Consumo_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_media_calculada
+    # -----------------------------------------
 
     # Demanda
     fatores_demanda = {
@@ -313,7 +333,7 @@ if not df_raw.empty:
 
 
     # ---------------------------------------------------
-    # TAB 3 — NOVA ABA 💡 EFICIÊNCIA
+    # TAB 3 — 💡 EFICIÊNCIA
     # ---------------------------------------------------
     with tab_eff:
         st.subheader("💡 Eficiência Energética — Potencial de Redução (%) e Economia")
@@ -345,7 +365,9 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
 
         resumo["Reducao_%"] = resumo["Categoria_Macro"].map(eficiencia_params)
         resumo["Economia_kWh"] = resumo["Consumo_Mensal_kWh"] * resumo["Reducao_%"]
-        resumo["Economia_R$"] = resumo["Economia_kWh"] * tarifa_kwh
+        
+        # ATUALIZADO: Usando tarifa média calculada (50/50 ponta/fora)
+        resumo["Economia_R$"] = resumo["Economia_kWh"] * tarifa_media_calculada
 
         economia_total_kwh = resumo["Economia_kWh"].sum()
         economia_total_rs = resumo["Economia_R$"].sum()
@@ -466,15 +488,17 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         # ECONOMIA ESTIMADA (REAL)
         # ------------------------------
         st.markdown("### 📉 Economia Mensal Estimada")
+        st.caption("Considerando a tarifa média calculada (50% Ponta / 50% Fora Ponta)")
 
+        # ATUALIZADO: Usando tarifa_media_calculada para a economia
         # Iluminação — economia de 60%
-        eco_luz = luz_trocadas * (0.030 * horas_luz * dias_mes * tarifa_kwh * 0.60)
+        eco_luz = luz_trocadas * (0.030 * horas_luz * dias_mes * tarifa_media_calculada * 0.60)
 
         # Ar Inverter — diferença média 1.4 kW -> 0.9 kW
-        eco_ar = ar_trocados * (1.4 * horas_ar * dias_mes * tarifa_kwh * 0.35)
+        eco_ar = ar_trocados * (1.4 * horas_ar * dias_mes * tarifa_media_calculada * 0.35)
 
         # PCs — economia típica de 115W
-        eco_pc = pc_trocados * (0.115 * horas_pc * dias_mes * tarifa_kwh)
+        eco_pc = pc_trocados * (0.115 * horas_pc * dias_mes * tarifa_media_calculada)
 
         economia_total = eco_luz + eco_ar + eco_pc
         payback = investimento / economia_total if economia_total > 0 else 999
@@ -560,11 +584,10 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         # ---------------------------
         st.markdown("### 🏢 Consumo por Setor (Unidade Administrativa)")
         
-        # <--- NOVA MÉTRICA ADICIONADA: MÉDIA POR SETOR --->
+        # Média por setor
         qtd_por_setor = df_raw.groupby('Setor')['Quant'].sum()
         media_aparelhos_setor = qtd_por_setor.mean()
         st.metric("Média de Aparelhos por Unidade Adm.", f"{media_aparelhos_setor:,.0f} un.")
-        # <------------------------------------------------>
 
         df_setor = df_raw.groupby("Setor")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
         df_setor = df_setor.sort_values("Custo_Consumo_R$", ascending=False)
