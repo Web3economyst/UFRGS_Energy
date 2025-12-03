@@ -41,14 +41,15 @@ def formatar_br(valor, prefixo="", sufixo="", decimais=2):
 # ---------------------------------------------------
 # 1. CARREGAMENTO DOS DADOS
 # ---------------------------------------------------
-DATA_URL_INVENTARIO = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/main/Planilha%20Unificada(Equipamentos%20Consumo).csv"
+DATA_URL_INVENTARIO = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Energy/refs/heads/main/Planilha%20Unificada(Equipamentos%20Consumo).csv"
 DATA_URL_OCUPACAO = "https://github.com/Web3economyst/UFRGS_Energy/raw/main/Hor%C3%A1rios.xlsx"
 
 @st.cache_data
 def load_data():
     try:
         # INVENTÁRIO
-        df_inv = pd.read_csv(DATA_URL_INVENTARIO, encoding='cp1252', on_bad_lines='skip')
+        # Alterado encoding para 'utf-8' para corrigir erro de leitura (0x81)
+        df_inv = pd.read_csv(DATA_URL_INVENTARIO, encoding='utf-8', on_bad_lines='skip')
         df_inv.columns = df_inv.columns.str.strip()
 
         df_inv['Quant'] = pd.to_numeric(df_inv['Quant'], errors='coerce').fillna(1)
