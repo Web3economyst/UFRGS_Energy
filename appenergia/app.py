@@ -12,7 +12,8 @@ st.set_page_config(page_title="Dashboard de Energia", layout="wide", page_icon="
 st.title("⚡ Eficiência Energética — Prédio da Reitoria")
 st.markdown("""
 Painel completo para **dimensionamento de demanda**, **consumo**, 
-**análise de ocupação**, **eficiência** e **viabilidade econômica**.""")
+**análise de ocupação**, **eficiência** e **viabilidade econômica**.
+""")
 
 # ---------------------------------------------------
 # 1. CARREGAMENTO DOS DADOS
@@ -505,6 +506,12 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         with col_a:
             st.markdown("### 🏬 Andares")
 
+            # <--- ALTERAÇÃO 1: CÁLCULO DA MÉDIA DE APARELHOS POR ANDAR
+            qtd_por_andar = df_raw.groupby('num_andar')['Quant'].sum()
+            media_aparelhos = qtd_por_andar.mean()
+            st.metric("Média de Aparelhos por Andar (Global)", f"{media_aparelhos:,.0f} un.")
+            # ---------------------------------------------------------
+
             lista_andares = sorted(df_raw['num_andar'].unique())
             andar_sel = st.selectbox("Selecione o andar:", lista_andares)
 
@@ -551,11 +558,10 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         st.divider()
 
         # ---------------------------
-        # AJUSTE SOLICITADO: CONSUMO POR SETOR (Anteriormente ID)
+        # CONSUMO POR SETOR
         # ---------------------------
         st.markdown("### 🏢 Consumo por Setor (Unidade Administrativa)")
         
-        # Agora agrupando pela coluna 'Setor' conforme solicitado
         df_setor = df_raw.groupby("Setor")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
         df_setor = df_setor.sort_values("Custo_Consumo_R$", ascending=False)
         
@@ -571,27 +577,34 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
         st.divider()
 
         # ---------------------------
-        # AJUSTE SOLICITADO: AQUECER / ESFRIAR
+        # ALTERAÇÃO 2: LISTA ESPECÍFICA DE APARELHOS AQUECIMENTO/RESFRIAMENTO + COZINHA
         # ---------------------------
-        st.markdown("### Gasto relacionada a aparelhos que aquecem e Esfriam")
+        st.markdown("### 🔥❄️ Gasto Relacionado a Aparelhos Térmicos e de Cozinha")
+        st.caption("Filtro: Ar Condicionado, Geladeira, Frigobar, Bebedouro, Microondas, Cafeteira, etc.")
         
-        # Filtro pelos equipamentos que contêm palavras chaves de climatização no nome genérico
-        keywords_clim = ['AR', 'COND', 'SPLIT', 'AQUEC', 'VENT', 'CLIMAT']
+        # Lista definida pelo usuário
+        target_keywords = [
+            "AR CONDICIONADO", "GELADEIRA", "FRIGOBAR", "REFRIGERADOR", 
+            "BEBEDOURO", "DESUMIDIFICADOR", "VENTILADOR", "MICROONDAS", 
+            "TORRADEIRA", "CAFETEIRA", "CHALEIRA", "FOGÃO", "FORNO", 
+            "AQUECEDOR", "FOGAREIRO"
+        ]
         
-        # Função auxiliar para filtrar
-        def is_clim(nome):
+        # Função auxiliar de filtro (busca parcial, uppercase)
+        def is_target_appliance(nome):
             n = str(nome).upper()
-            return any(k in n for k in keywords_clim)
+            return any(k in n for k in target_keywords)
         
-        df_clim = df_raw[df_raw['des_nome_generico_equipamento'].apply(is_clim)].copy()
+        # Filtragem usando a lista específica
+        df_clim = df_raw[df_raw['des_nome_generico_equipamento'].apply(is_target_appliance)].copy()
         
         if not df_clim.empty:
             df_clim_g = df_clim.groupby("des_nome_generico_equipamento")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
             df_clim_g = df_clim_g.sort_values("Custo_Consumo_R$", ascending=False)
             
             c_clim1, c_clim2 = st.columns(2)
-            c_clim1.metric("Custo Total Climatização", f"R$ {df_clim['Custo_Consumo_R$'].sum():,.2f}")
-            c_clim2.metric("Consumo Total Climatização", f"{df_clim['Consumo_Mensal_kWh'].sum():,.0f} kWh")
+            c_clim1.metric("Custo Total (Selecionados)", f"R$ {df_clim['Custo_Consumo_R$'].sum():,.2f}")
+            c_clim2.metric("Consumo Total (Selecionados)", f"{df_clim['Consumo_Mensal_kWh'].sum():,.0f} kWh")
 
             st.dataframe(
                 df_clim_g.style.format({
@@ -602,11 +615,7 @@ quanto pode ser economizado **por categoria**, e qual seria a **economia total m
                 hide_index=True
             )
         else:
-            st.info("Nenhum equipamento de aquecer/esfriar identificado com os termos comuns (Ar, Split, Aquecedor, Ventilador).")
+            st.info("Nenhum equipamento da lista específica foi identificado.")
 
 else:
     st.warning("Carregando dados... Verifique sua conexão.")
-
-
-
-
