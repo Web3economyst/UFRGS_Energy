@@ -506,27 +506,20 @@ if not df_raw.empty:
 
         col_a, col_s = st.columns(2)
 
+        # AGORA COL_A É "SETOR" (Unidade Administrativa)
         with col_a:
-            st.markdown("### 🏬 Andares")
+            st.markdown("### 🏢 Consumo por Setor (Unidade Administrativa)")
+            
+            qtd_por_setor = df_raw.groupby('Setor')['Quant'].sum()
+            media_aparelhos_setor = qtd_por_setor.mean()
+            st.metric("Média de Aparelhos por Unidade Adm.", formatar_br(media_aparelhos_setor, sufixo=" un.", decimais=0))
 
-            qtd_por_andar = df_raw.groupby('num_andar')['Quant'].sum()
-            media_aparelhos = qtd_por_andar.mean()
-            st.metric("Média de Aparelhos por Andar", formatar_br(media_aparelhos, sufixo=" un.", decimais=0))
-
-            lista_andares = sorted(df_raw['num_andar'].unique())
-            andar_sel = st.selectbox("Selecione o andar:", lista_andares)
-
-            df_andar = df_raw[df_raw['num_andar'] == andar_sel]
-            custo_andar = df_andar["Custo_Consumo_R$"].sum()
-            st.metric(f"Custo Total — Andar {andar_sel}", formatar_br(custo_andar, prefixo="R$ "))
-
-            df_andar_salas = (
-                df_andar.groupby("Id_sala")["Custo_Consumo_R$"]
-                .sum().reset_index().sort_values("Custo_Consumo_R$", ascending=False)
-            )
-
+            df_setor = df_raw.groupby("Setor")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
+            df_setor = df_setor.sort_values("Custo_Consumo_R$", ascending=False)
+            
             st.dataframe(
-                df_andar_salas.style.format({
+                df_setor.style.format({
+                    "Consumo_Mensal_kWh": lambda x: formatar_br(x, sufixo=" kWh", decimais=0),
                     "Custo_Consumo_R$": lambda x: formatar_br(x, prefixo="R$ ")
                 }),
                 use_container_width=True, hide_index=True
@@ -555,18 +548,27 @@ if not df_raw.empty:
         
         st.divider()
 
-        st.markdown("### 🏢 Consumo por Setor (Unidade Administrativa)")
-        
-        qtd_por_setor = df_raw.groupby('Setor')['Quant'].sum()
-        media_aparelhos_setor = qtd_por_setor.mean()
-        st.metric("Média de Aparelhos por Unidade Adm.", formatar_br(media_aparelhos_setor, sufixo=" un.", decimais=0))
+        # AGORA ANDAR FICA EMBAIXO, OCUPANDO LARGURA TOTAL
+        st.markdown("### 🏬 Andares")
 
-        df_setor = df_raw.groupby("Setor")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
-        df_setor = df_setor.sort_values("Custo_Consumo_R$", ascending=False)
-        
+        qtd_por_andar = df_raw.groupby('num_andar')['Quant'].sum()
+        media_aparelhos = qtd_por_andar.mean()
+        st.metric("Média de Aparelhos por Andar", formatar_br(media_aparelhos, sufixo=" un.", decimais=0))
+
+        lista_andares = sorted(df_raw['num_andar'].unique())
+        andar_sel = st.selectbox("Selecione o andar:", lista_andares)
+
+        df_andar = df_raw[df_raw['num_andar'] == andar_sel]
+        custo_andar = df_andar["Custo_Consumo_R$"].sum()
+        st.metric(f"Custo Total — Andar {andar_sel}", formatar_br(custo_andar, prefixo="R$ "))
+
+        df_andar_salas = (
+            df_andar.groupby("Id_sala")["Custo_Consumo_R$"]
+            .sum().reset_index().sort_values("Custo_Consumo_R$", ascending=False)
+        )
+
         st.dataframe(
-            df_setor.style.format({
-                "Consumo_Mensal_kWh": lambda x: formatar_br(x, sufixo=" kWh", decimais=0),
+            df_andar_salas.style.format({
                 "Custo_Consumo_R$": lambda x: formatar_br(x, prefixo="R$ ")
             }),
             use_container_width=True, hide_index=True
