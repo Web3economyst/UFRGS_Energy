@@ -48,7 +48,6 @@ DATA_URL_OCUPACAO = "https://github.com/Web3economyst/UFRGS_Energy/raw/main/Hor%
 def load_data():
     try:
         # INVENTÁRIO
-        # Alterado encoding para 'utf-8' para corrigir erro de leitura (0x81)
         df_inv = pd.read_csv(DATA_URL_INVENTARIO, encoding='utf-8', on_bad_lines='skip')
         df_inv.columns = df_inv.columns.str.strip()
 
@@ -133,12 +132,15 @@ if not df_raw.empty:
         st.subheader("🌦️ Estação / Sazonalidade")
         periodo = st.radio("Selecione:", ["Verão (Alto Consumo)", "Inverno/Ameno (Baixo Consumo)"])
 
+        # --- LÓGICA DE SAZONALIDADE ALTERADA (DUTY CYCLE) ---
         if "Verão" in periodo:
-            fator_sazonal_clima = 1.30
+            # Compressor trabalha mais (Ciclo 0.65)
+            duty_cycle_ac = 0.65
             sugestao_ponta = 1.85
             sugestao_fora = 0.65
         else:
-            fator_sazonal_clima = 0.60
+            # Compressor trabalha menos (Ciclo 0.30)
+            duty_cycle_ac = 0.30 
             sugestao_ponta = 1.60
             sugestao_fora = 0.55
 
@@ -186,24 +188,41 @@ if not df_raw.empty:
 
     df_raw['Categoria_Macro'] = df_raw['des_categoria'].apply(agrupar)
 
-    # Consumo
+    # --- NOVA FUNÇÃO DE CONSUMO (PADRONIZADA) ---
     def consumo(row):
         cat = row['Categoria_Macro']
-        if str(row['Id_sala']) in salas_24h:
+        nome = str(row['des_nome_generico_equipamento']).upper()
+        
+        # 1. Definição de Variáveis de Tempo (Horas e Dias)
+        # Regra para equipamentos que SÃO 24h nativamente (independente da sala)
+        itens_24h_nativos = ["GELADEIRA", "FRIGOBAR", "REFRIGERADOR", "SERVIDOR", "RACK", "MODEM", "ROTEADOR", "SWITCH"]
+        eh_item_24h = any(x in nome for x in itens_24h_nativos)
+
+        if str(row['Id_sala']) in salas_24h or eh_item_24h:
             h = 24
-            dias = 30
+            dias = 30 # Geladeira/Servidor não para feriado
         else:
+            dias = dias_mes # Padrão do input (ex: 22)
             if cat == "Climatização": h = horas_ar
             elif cat == "Iluminação": h = horas_luz
             elif cat == "Informática": h = horas_pc
             elif cat == "Eletrodomésticos": h = horas_eletro
             else: h = horas_outros
-            dias = dias_mes
 
-        cons = (row['Potencia_Total_Item_W'] * h * dias) / 1000
+        # 2. Definição do Fator de Uso (Duty Cycle) - Baseado no Relatório V2.0
+        fator_uso = 1.00 # Padrão (Lâmpadas, etc)
         
-        if cat == 'Climatização':
-            return cons * fator_sazonal_clima
+        if cat == "Climatização":
+            fator_uso = duty_cycle_ac # Vem do slider de sazonalidade (0.65 ou 0.30)
+        elif cat == "Informática":
+            fator_uso = 0.80 # Computador não usa fonte máxima
+        elif "GELADEIRA" in nome or "FRIGOBAR" in nome or "BEBEDOURO" in nome:
+            fator_uso = 0.45 # Motor da geladeira não liga 100% do tempo (ciclo termostato)
+        
+        # 3. Cálculo Final
+        # (Potencia * Qtd já está em Potencia_Total_Item_W)
+        cons = (row['Potencia_Total_Item_W'] * h * dias * fator_uso) / 1000
+        
         return cons
 
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(consumo, axis=1)
@@ -245,7 +264,8 @@ if not df_raw.empty:
     # ---------------------------------------------------
     with tab1:
         st.subheader("📉 Dimensionamento de Demanda (kW)")
-        st.caption(f"Estação atual: **{periodo}** (Clima: {fator_sazonal_clima}x)")
+        # Legenda atualizada para refletir o Duty Cycle
+        st.caption(f"Estação atual: **{periodo}** (Fator Uso AC: {duty_cycle_ac})")
 
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Potência Instalada", formatar_br(total_instalado_kw, sufixo=" kW", decimais=1))
