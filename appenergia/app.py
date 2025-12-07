@@ -348,7 +348,7 @@ if not df_raw.empty:
         st.markdown("### 🔍 Consumo Real (kWh) vs Capacidade (kW)")
 
         potencia_media_kw = consumo_total_kwh / 720  # Consumo total / (30 dias * 24h)
-fator_carga = (potencia_media_kw / total_demanda_pico_kw) if total_demanda_pico_kw > 0 else 0
+        fator_carga = (potencia_media_kw / total_demanda_pico_kw) if total_demanda_pico_kw > 0 else 0
 
         p1, p2, p3 = st.columns(3)
         p1.metric("Potência Média Real", formatar_br(potencia_media_kw, sufixo=" kW", decimais=1))
