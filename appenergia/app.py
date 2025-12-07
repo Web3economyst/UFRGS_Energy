@@ -7,31 +7,24 @@ import numpy as np
 # ---------------------------------------------------
 # CONFIGURAÇÃO INICIAL
 # ---------------------------------------------------
-st.set_page_config(page_title="Dashboard de Energia", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Relatório Diagnóstico Energético (AS-IS)", layout="wide", page_icon="⚡")
 
-st.title("⚡ Eficiência Energética — Prédio da Reitoria")
+st.title("⚡ Diagnóstico Energético — Edifício Reitoria")
 st.markdown("""
-Painel completo para **dimensionamento de demanda**, **consumo**, 
-**análise de ocupação**, **eficiência** e **viabilidade econômica**.
+Painel ajustado conforme **Relatório Técnico (AS-IS) - Outubro 2025**.
+Premissas: **Tarifa Verde A4**, Janela Operacional **07:00 - 18:30**, Modelagem **Bottom-Up**.
 """)
 
 # ---------------------------------------------------
 # FUNÇÃO DE FORMATAÇÃO PT-BR
 # ---------------------------------------------------
 def formatar_br(valor, prefixo="", sufixo="", decimais=2):
-    """
-    Formata números float para string no padrão brasileiro:
-    1.234,56 (milhar com ponto, decimal com vírgula)
-    """
     try:
         if pd.isna(valor):
             return "-"
         
-        # Formata primeiro com padrão US (vírgula=milhar, ponto=decimal)
         formato = f"{{:,.{decimais}f}}"
         texto = formato.format(valor)
-        
-        # Troca os caracteres
         texto = texto.replace(",", "X").replace(".", ",").replace("X", ".")
         
         return f"{prefixo}{texto}{sufixo}"
@@ -64,7 +57,6 @@ def load_data():
         else:
             df_inv['Id_sala'] = 'Não Identificado'
         
-        # Tratamento da coluna Setor
         if 'Setor' in df_inv.columns:
             df_inv['Setor'] = df_inv['Setor'].astype(str).str.strip().replace(['nan','NaN',''], 'Não Identificado')
         else:
@@ -123,57 +115,68 @@ def load_data():
 df_raw, df_ocupacao = load_data()
 
 # ---------------------------------------------------
-# 2. SIDEBAR — PARÂMETROS E SAZONALIDADE
+# 2. SIDEBAR — PARÂMETROS BASEADOS NO RELATÓRIO
 # ---------------------------------------------------
 if not df_raw.empty:
     with st.sidebar:
-        st.header("⚙️ Parâmetros do Modelo")
+        st.header("⚙️ Premissas do Relatório")
 
-        st.subheader("🌦️ Estação / Sazonalidade")
-        periodo = st.radio("Selecione:", ["Verão (Alto Consumo)", "Inverno/Ameno (Baixo Consumo)"])
+        st.subheader("🌦️ Sazonalidade / Duty Cycle")
+        periodo = st.radio("Cenário:", ["Relatório (Outubro/Verão)", "Inverno (Econômico)"])
 
-        # --- LÓGICA DE SAZONALIDADE ALTERADA (DUTY CYCLE) ---
-        if "Verão" in periodo:
-            # Compressor trabalha mais (Ciclo 0.65)
-            duty_cycle_ac = 0.65
-            sugestao_ponta = 1.85
-            sugestao_fora = 0.65
+        # --- AJUSTE BASEADO NO ITEM 2.2 DO RELATÓRIO ---
+        if "Relatório" in periodo:
+            # Relatório especifica Fator 0.60 para AC
+            duty_cycle_ac = 0.60
+            fator_pc = 0.80
         else:
-            # Compressor trabalha menos (Ciclo 0.30)
+            # Cenário hipotético de baixo uso
             duty_cycle_ac = 0.30 
-            sugestao_ponta = 1.60
-            sugestao_fora = 0.55
+            fator_pc = 0.80
 
-        # TARIFAS
-        st.subheader("💰 Tarifas (R$/kWh)")
+        # TARIFAS (ITEM 2.1)
+        st.subheader("💰 Tarifas (Grupo A4)")
+        st.caption("Valores estimados com impostos (Relatório Item 2.1)")
+        
         c_tar1, c_tar2 = st.columns(2)
         with c_tar1:
-            tarifa_ponta = st.number_input("Ponta", value=sugestao_ponta, format="%.2f", help="Use ponto para decimais na entrada.")
+            # Valor ajustado para R$ 2,90 conforme relatório
+            tarifa_ponta = st.number_input("Ponta (R$/kWh)", value=2.90, format="%.2f")
         with c_tar2:
-            tarifa_fora_ponta = st.number_input("Fora Ponta", value=sugestao_fora, format="%.2f")
+            # Valor ajustado para R$ 0,70 conforme relatório
+            tarifa_fora_ponta = st.number_input("Fora P. (R$/kWh)", value=0.70, format="%.2f")
         
-        tarifa_media_calculada = (tarifa_ponta * 0.5) + (tarifa_fora_ponta * 0.5)
+        # --- CÁLCULO DA TARIFA MÉDIA PONDERADA (RELATÓRIO) ---
+        # Janela: 07:00 às 18:30 (11,5 horas totais)
+        # Ponta: 18:00 às 18:30 (0,5 horas)
+        # Fora Ponta: 11,0 horas
+        peso_ponta = 0.5 / 11.5
+        peso_fora = 11.0 / 11.5
         
-        # Exibição da tarifa média formatada BR
-        st.caption(f"Tarifa Média (Mix 50/50): **{formatar_br(tarifa_media_calculada, prefixo='R$ ')}/kWh**")
+        tarifa_media_calculada = (tarifa_ponta * peso_ponta) + (tarifa_fora_ponta * peso_fora)
+        
+        st.info(f"Tarifa Média Ponderada: **{formatar_br(tarifa_media_calculada, prefixo='R$ ')}/kWh**\n\n(Base: 30min Ponta / 11h Fora Ponta)")
         
         tarifa_kw_demanda = st.number_input("Tarifa Demanda (R$/kW)", value=40.0)
 
         st.divider()
-        st.subheader("🕒 Salas 24h")
+        st.subheader("🕒 Horas de Operação")
+        st.caption("Padrão Relatório: 11.5h (07:00-18:30)")
+        
         lista_salas = sorted(df_raw['Id_sala'].unique().astype(str))
-        salas_24h = st.multiselect("Escolha:", lista_salas)
+        salas_24h = st.multiselect("Salas 24h (Exceção):", lista_salas)
 
-        with st.expander("Horas de Uso por Categoria"):
-            horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
-            horas_luz = st.slider("Iluminação", 0, 24, 10)
-            horas_pc = st.slider("Informática", 0, 24, 9)
-            horas_eletro = st.slider("Eletrodomésticos", 0, 24, 5)
-            horas_outros = st.slider("Outros", 0, 24, 6)
-            dias_mes = st.number_input("Dias no mês", value=22)
+        with st.expander("Ajustar Horas (Padrão Relatório)"):
+            # Padrão ajustado para 11.5 conforme Item 2.1
+            horas_ar = st.slider("Ar Condicionado", 0.0, 24.0, 11.5, step=0.5)
+            horas_luz = st.slider("Iluminação", 0.0, 24.0, 11.5, step=0.5)
+            horas_pc = st.slider("Informática", 0.0, 24.0, 11.5, step=0.5)
+            horas_eletro = st.slider("Eletrodomésticos", 0.0, 24.0, 5.0, step=0.5)
+            horas_outros = st.slider("Outros", 0.0, 24.0, 6.0, step=0.5)
+            dias_mes = st.number_input("Dias Úteis/Mês", value=22)
 
     # ---------------------------------------------------
-    # 3. CÁLCULOS TÉCNICOS
+    # 3. CÁLCULOS TÉCNICOS (FÓRMULAS ITEM 2.2)
     # ---------------------------------------------------
 
     def agrupar(cat):
@@ -188,47 +191,47 @@ if not df_raw.empty:
 
     df_raw['Categoria_Macro'] = df_raw['des_categoria'].apply(agrupar)
 
-    # --- NOVA FUNÇÃO DE CONSUMO (PADRONIZADA) ---
     def consumo(row):
         cat = row['Categoria_Macro']
         nome = str(row['des_nome_generico_equipamento']).upper()
         
-        # 1. Definição de Variáveis de Tempo (Horas e Dias)
-        # Regra para equipamentos que SÃO 24h nativamente (independente da sala)
+        # Itens nativamente 24h
         itens_24h_nativos = ["GELADEIRA", "FRIGOBAR", "REFRIGERADOR", "SERVIDOR", "RACK", "MODEM", "ROTEADOR", "SWITCH"]
         eh_item_24h = any(x in nome for x in itens_24h_nativos)
 
         if str(row['Id_sala']) in salas_24h or eh_item_24h:
             h = 24
-            dias = 30 # Geladeira/Servidor não para feriado
+            dias = 30 
         else:
-            dias = dias_mes # Padrão do input (ex: 22)
+            dias = dias_mes 
             if cat == "Climatização": h = horas_ar
             elif cat == "Iluminação": h = horas_luz
             elif cat == "Informática": h = horas_pc
             elif cat == "Eletrodomésticos": h = horas_eletro
             else: h = horas_outros
 
-        # 2. Definição do Fator de Uso (Duty Cycle) - Baseado no Relatório V2.0
-        fator_uso = 1.00 # Padrão (Lâmpadas, etc)
+        # Definição do Fator de Uso (Duty Cycle)
+        fator_uso = 1.00 # Padrão para iluminação e cargas resistivas puras
         
         if cat == "Climatização":
-            fator_uso = duty_cycle_ac # Vem do slider de sazonalidade (0.65 ou 0.30)
+            fator_uso = duty_cycle_ac # 0.60 conforme Relatório
         elif cat == "Informática":
-            fator_uso = 0.80 # Computador não usa fonte máxima
+            fator_uso = fator_pc # 0.80 conforme Relatório
         elif "GELADEIRA" in nome or "FRIGOBAR" in nome or "BEBEDOURO" in nome:
-            fator_uso = 0.45 # Motor da geladeira não liga 100% do tempo (ciclo termostato)
+            # Ajuste Fino: Relatório diz "Cargas 24h = 1.00", mas tabela mostra consumo menor.
+            # 0.40 aproxima o valor teórico do valor da tabela do relatório para Geladeiras.
+            fator_uso = 0.40 
         
-        # 3. Cálculo Final
-        # (Potencia * Qtd já está em Potencia_Total_Item_W)
         cons = (row['Potencia_Total_Item_W'] * h * dias * fator_uso) / 1000
         
         return cons
 
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(consumo, axis=1)
+    
+    # Custo considera a média ponderada calculada (Ponta vs Fora Ponta)
     df_raw['Custo_Consumo_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_media_calculada
 
-    # Demanda
+    # Demanda Estimada
     fatores_demanda = {
         'Climatização': 0.85, 'Iluminação': 1.00, 'Informática': 0.70,
         'Eletrodomésticos': 0.50, 'Elevadores': 0.30, 'Bombas': 0.70, 'Outros': 0.50
@@ -240,7 +243,7 @@ if not df_raw.empty:
         axis=1
     )
 
-    # Totais
+    # Totais Globais
     total_instalado_kw = df_raw['Potencia_Instalada_kW'].sum()
     total_demanda_pico_kw = df_raw['Demanda_Estimada_kW'].sum()
     consumo_total_kwh = df_raw['Consumo_Mensal_kWh'].sum()
@@ -253,19 +256,18 @@ if not df_raw.empty:
     # ---------------------------------------------------
     tab1, tab2, tab_eff, tab3, tab4 = st.tabs([
         "📉 Dimensionamento (kW)",
-        "⚡ Consumo (kWh)",
+        "⚡ Consumo & Custo",
         "💡 Eficiência",
         "💰 Viabilidade / ROI",
-        "🏫 Detalhe por Andar / Sala"
+        "🏫 Detalhe Setor/Andar"
     ])
 
     # ---------------------------------------------------
-    # TAB 1 — DIMENSIONAMENTO (BLOCO 1)
+    # TAB 1 — DIMENSIONAMENTO
     # ---------------------------------------------------
     with tab1:
         st.subheader("📉 Dimensionamento de Demanda (kW)")
-        # Legenda atualizada para refletir o Duty Cycle
-        st.caption(f"Estação atual: **{periodo}** (Fator Uso AC: {duty_cycle_ac})")
+        st.caption(f"Fator Uso AC: **{duty_cycle_ac}** | Tarifa Média Aplicada: **{formatar_br(tarifa_media_calculada, prefixo='R$ ')}**")
 
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Potência Instalada", formatar_br(total_instalado_kw, sufixo=" kW", decimais=1))
@@ -281,14 +283,6 @@ if not df_raw.empty:
 
         st.divider()
 
-        if not df_ocupacao.empty:
-            st.markdown("### 👥 Ocupação — Fluxo ao longo do tempo")
-            fig_oc = px.line(df_ocupacao, x="DataHora", y="Ocupacao_Acumulada",
-                             title="Fluxo de Pessoas (Acumulado Diário)")
-            fig_oc.update_layout(separators=",.") # Ajuste BR para eixos
-            st.plotly_chart(fig_oc, use_container_width=True)
-            st.divider()
-
         c_gauge, c_info = st.columns([1, 1.3])
         with c_gauge:
             fig_gauge = go.Figure(go.Indicator(
@@ -301,86 +295,83 @@ if not df_raw.empty:
                     'threshold': {'value': total_demanda_pico_kw, 'line': {'color': "red", 'width': 4}},
                 }
             ))
-            fig_gauge.update_layout(separators=",.") # Ponto como milhar, virgula decimal
+            fig_gauge.update_layout(separators=",.") 
             st.plotly_chart(fig_gauge, use_container_width=True)
 
             kVA = total_demanda_pico_kw / 0.92
-            st.info(f"⚙️ Transformador recomendado: **{formatar_br(kVA, decimais=0)} kVA** (FP = 0.92)")
+            st.info(f"⚙️ Transformador ideal: **{formatar_br(kVA, decimais=0)} kVA** (FP = 0.92)")
 
         with c_info:
             st.markdown("### Tabela de Demanda por Categoria")
             dft = df_raw.groupby('Categoria_Macro')[['Potencia_Instalada_kW', 'Demanda_Estimada_kW']].sum().reset_index()
             dft['Fator'] = dft['Categoria_Macro'].map(fatores_demanda)
-            dft['Custo Demanda (R$)'] = dft['Demanda_Estimada_kW'] * tarifa_kw_demanda
-
-            # Aplicação de estilo BR na tabela
+            
             st.dataframe(
                 dft.sort_values('Demanda_Estimada_kW', ascending=False).style.format({
                     'Potencia_Instalada_kW': lambda x: formatar_br(x, decimais=1),
                     'Demanda_Estimada_kW': lambda x: formatar_br(x, decimais=1),
-                    'Fator': lambda x: formatar_br(x, decimais=2),
-                    'Custo Demanda (R$)': lambda x: formatar_br(x, prefixo="R$ ")
+                    'Fator': lambda x: formatar_br(x, decimais=2)
                 }),
                 use_container_width=True, hide_index=True
             )
-
-        st.divider()
-
-        st.markdown("### 🔍 Consumo Real (kWh) vs Capacidade (kW)")
-
-        potencia_media_kw = consumo_total_kwh / 720  
-
-        p1, p2, p3 = st.columns(3)
-        p1.metric("Potência Média Real", formatar_br(potencia_media_kw, sufixo=" kW", decimais=1))
-        p2.metric("Uso vs Pico", formatar_br((potencia_media_kw/total_demanda_pico_kw)*100, sufixo="%"))
-        p3.metric("Uso vs Instalada", formatar_br((potencia_media_kw/total_instalado_kw)*100, sufixo="%"))
-
-        if potencia_media_kw < 0.7 * total_demanda_pico_kw:
-            st.success("Uso real **bem abaixo do pico**.")
-        elif potencia_media_kw < total_demanda_pico_kw:
-            st.info("Uso **dentro da capacidade**, mas próximo do limite.")
-        else:
-            st.warning("⚠️ Uso real **acima do pico** — revise a demanda.")
 
     # ---------------------------------------------------
     # TAB 2 — CONSUMO
     # ---------------------------------------------------
     with tab2:
-        st.subheader("⚡ Consumo Mensal (kWh)")
+        st.subheader("⚡ Consumo e Fatura (Base Outubro/2025)")
+        st.caption("Comparativo com Relatório: Consumo Total e Distribuição de Custos")
 
         fatura_total = custo_demanda_fixo + custo_total_consumo
 
         k1, k2, k3 = st.columns(3)
-        k1.metric("Consumo Total", formatar_br(consumo_total_kwh, sufixo=" kWh", decimais=0))
-        k2.metric("Custo Variável", formatar_br(custo_total_consumo, prefixo="R$ "))
-        k3.metric("Conta Total Estimada", formatar_br(fatura_total, prefixo="R$ "))
+        k1.metric("Consumo Total", formatar_br(consumo_total_kwh, sufixo=" kWh", decimais=0), delta="Meta Relatório: 77.022 kWh", delta_color="off")
+        k2.metric("Custo Variável (Energia)", formatar_br(custo_total_consumo, prefixo="R$ "))
+        k3.metric("Fatura Total Estimada", formatar_br(fatura_total, prefixo="R$ "), delta="Meta Relatório: ~R$ 63k", delta_color="off")
 
         st.divider()
 
         # Gráfico Consumo
-        df_cons_cat = df_raw.groupby('Categoria_Macro')['Consumo_Mensal_kWh'].sum().reset_index()
-        fig_bar = px.bar(
-            df_cons_cat,
-            x='Categoria_Macro', y='Consumo_Mensal_kWh',
-            color='Categoria_Macro', 
-            title="Consumo por Categoria"
-        )
-        # Formatar tooltips e eixos para BR
-        fig_bar.update_layout(separators=",.")
-        fig_bar.update_traces(texttemplate='%{y:,.0f} kWh', textposition='outside')
+        df_cons_cat = df_raw.groupby('Categoria_Macro')[['Consumo_Mensal_kWh', 'Custo_Consumo_R$']].sum().reset_index()
         
-        st.plotly_chart(fig_bar, use_container_width=True)
+        c_g1, c_g2 = st.columns(2)
+        
+        with c_g1:
+            fig_bar = px.bar(
+                df_cons_cat,
+                x='Categoria_Macro', y='Custo_Consumo_R$',
+                color='Categoria_Macro', 
+                title="Custo Financeiro por Categoria (R$)"
+            )
+            fig_bar.update_layout(separators=",.")
+            fig_bar.update_traces(texttemplate='R$ %{y:,.0f}', textposition='outside')
+            st.plotly_chart(fig_bar, use_container_width=True)
+            
+        with c_g2:
+             st.markdown("### 📋 Top Equipamentos (Impacto Financeiro)")
+             st.caption("Conforme Item 4 do Relatório")
+             top_eq = df_raw.groupby('des_nome_generico_equipamento')[['Quant','Consumo_Mensal_kWh','Custo_Consumo_R$']].sum().reset_index()
+             top_eq = top_eq.sort_values('Custo_Consumo_R$', ascending=False).head(8)
+             
+             st.dataframe(
+                top_eq.style.format({
+                    'Consumo_Mensal_kWh': lambda x: formatar_br(x, decimais=0),
+                    'Custo_Consumo_R$': lambda x: formatar_br(x, prefixo="R$ "),
+                    'Quant': '{:.0f}'
+                }),
+                use_container_width=True, hide_index=True
+             )
 
 
     # ---------------------------------------------------
     # TAB 3 — 💡 EFICIÊNCIA
     # ---------------------------------------------------
     with tab_eff:
-        st.subheader("💡 Eficiência Energética — Potencial de Redução (%) e Economia")
+        st.subheader("💡 Eficiência Energética — Potencial de Redução")
 
         st.markdown("""
-        Abaixo você encontra um diagnóstico detalhado de **onde estão os maiores desperdícios**,  
-        quanto pode ser economizado **por categoria**, e qual seria a **economia total mensal**.
+        O relatório aponta o sistema de **Climatização** como 42,7% do custo.
+        Abaixo, calculamos o potencial de *retrofit* e uso consciente.
         """)
 
         eficiencia_params = {
@@ -393,26 +384,11 @@ if not df_raw.empty:
         resumo["Economia_kWh"] = resumo["Consumo_Mensal_kWh"] * resumo["Reducao_%"]
         resumo["Economia_R$"] = resumo["Economia_kWh"] * tarifa_media_calculada
 
-        economia_total_kwh = resumo["Economia_kWh"].sum()
         economia_total_rs = resumo["Economia_R$"].sum()
 
         c1, c2 = st.columns(2)
-        c1.metric("Economia Máxima em Energia", formatar_br(economia_total_kwh, sufixo=" kWh/mês", decimais=0))
-        c2.metric("Economia Máxima em Reais", formatar_br(economia_total_rs, prefixo="R$ ", sufixo="/mês"))
-
-        st.divider()
-
-        st.markdown("###  Economia por Categoria")
-        st.dataframe(
-            resumo.sort_values("Economia_R$", ascending=False).style.format({
-                "Consumo_Mensal_kWh": lambda x: formatar_br(x, decimais=0),
-                "Reducao_%": "{:.0%}",
-                "Economia_kWh": lambda x: formatar_br(x, decimais=0),
-                "Economia_R$": lambda x: formatar_br(x, prefixo="R$ ")
-            }),
-            use_container_width=True,
-            hide_index=True
-        )
+        c1.metric("Economia Potencial (kWh)", formatar_br(resumo["Economia_kWh"].sum(), sufixo=" kWh/mês", decimais=0))
+        c2.metric("Redução na Fatura (R$)", formatar_br(economia_total_rs, prefixo="R$ ", sufixo="/mês"))
 
         st.divider()
 
@@ -422,55 +398,45 @@ if not df_raw.empty:
                 resumo,
                 x="Categoria_Macro",
                 y="Economia_R$",
-                title="Economia Potencial por Categoria (R$)",
+                title="Onde economizar mais? (Pareto)",
                 color="Categoria_Macro"
             )
             fig_econ.update_layout(separators=",.")
-            # Formatando o texto das barras manualmente para BR
             fig_econ.update_traces(texttemplate='R$ %{y:,.2f}', textposition='outside')
             st.plotly_chart(fig_econ, use_container_width=True)
 
         with col_p:
-            fig_pie_e = px.pie(
-                resumo,
-                values="Economia_R$",
-                names="Categoria_Macro",
-                hole=0.4,
-                title="Distribuição da Economia"
+            st.dataframe(
+                resumo[["Categoria_Macro", "Economia_R$"]].sort_values("Economia_R$", ascending=False).style.format({
+                    "Economia_R$": lambda x: formatar_br(x, prefixo="R$ ")
+                }),
+                use_container_width=True, hide_index=True
             )
-            fig_pie_e.update_layout(separators=",.")
-            fig_pie_e.update_traces(textinfo='percent+label')
-            st.plotly_chart(fig_pie_e, use_container_width=True)
 
     # ---------------------------------------------------
     # TAB 4 — VIABILIDADE / ROI
     # ---------------------------------------------------
     with tab3:
-        st.subheader("💰 Simulador de Viabilidade — ROI do Projeto")
+        st.subheader("💰 Simulador de Investimento (Retrofit)")
 
         col_l, col_r = st.columns([1, 2])
 
         with col_l:
-            st.markdown("### Parâmetros do Projeto")
-            
-            # Inputs continuam padrão Python (ponto), mas o display pode ser ajustado na mente do usuário
+            st.markdown("### Budget")
             investimento = st.number_input(
                 "Orçamento disponível (R$):",
                 value=50000.0,
                 step=5000.0
             )
 
-            st.markdown("#### 🔧 Custos unitários de modernização")
+            st.markdown("#### Custos Unitários")
             custo_led = st.number_input("Troca p/ LED", value=25.0)
             custo_ar = st.number_input("Ar Inverter (R$)", value=3500.0)
             custo_pc = st.number_input("Mini PC (R$)", value=2800.0)
 
-            st.info("""
-            📌 **Ordem de prioridade automática:** 1) Iluminação → 2) Climatização → 3) Informática  
-            """)
-
         with col_r:
-            st.markdown("### Distribuição automática da verba")
+            st.markdown("### Alocação Automática")
+            st.info("Prioridade: Iluminação > Climatização > TI")
 
             qtd_luz = df_raw[df_raw["Categoria_Macro"] == "Iluminação"]["Quant"].sum()
             qtd_ar = df_raw[df_raw["Categoria_Macro"] == "Climatização"]["Quant"].sum()
@@ -492,68 +458,45 @@ if not df_raw.empty:
             pc_trocados = int(inv_pc / custo_pc)
 
             c1, c2, c3 = st.columns(3)
-            c1.metric("Lâmpadas instaladas", formatar_br(luz_trocadas, sufixo=" un.", decimais=0))
-            c2.metric("Ar-condicionados novos", formatar_br(ar_trocados, sufixo=" un.", decimais=0))
-            c3.metric("Mini PCs adquiridos", formatar_br(pc_trocados, sufixo=" un.", decimais=0))
+            c1.metric("Lâmpadas", f"{luz_trocadas} un.")
+            c2.metric("Ar Condicionado", f"{ar_trocados} un.")
+            c3.metric("Computadores", f"{pc_trocados} un.")
 
-        st.divider()
+            st.divider()
 
-        st.markdown("### 📉 Economia Mensal Estimada")
-        st.caption("Considerando a tarifa média calculada (50% Ponta / 50% Fora Ponta)")
+            # Cálculo de Economia ROI
+            eco_luz = luz_trocadas * (0.030 * horas_luz * dias_mes * tarifa_media_calculada * 0.60)
+            eco_ar = ar_trocados * (1.4 * horas_ar * dias_mes * tarifa_media_calculada * 0.35)
+            eco_pc = pc_trocados * (0.115 * horas_pc * dias_mes * tarifa_media_calculada)
 
-        eco_luz = luz_trocadas * (0.030 * horas_luz * dias_mes * tarifa_media_calculada * 0.60)
-        eco_ar = ar_trocados * (1.4 * horas_ar * dias_mes * tarifa_media_calculada * 0.35)
-        eco_pc = pc_trocados * (0.115 * horas_pc * dias_mes * tarifa_media_calculada)
+            economia_total = eco_luz + eco_ar + eco_pc
+            payback = investimento / economia_total if economia_total > 0 else 999
 
-        economia_total = eco_luz + eco_ar + eco_pc
-        payback = investimento / economia_total if economia_total > 0 else 999
-
-        k1, k2 = st.columns(2)
-        k1.metric("Economia Mensal", formatar_br(economia_total, prefixo="R$ "))
-        k2.metric("Payback Estimado", formatar_br(payback, sufixo=" meses", decimais=1))
-
-        if payback < 12:
-            st.success("🔋 Excelente viabilidade — retorno inferior a 1 ano.")
-        elif payback < 36:
-            st.info("Boa viabilidade — retorno moderado.")
-        else:
-            st.warning("Retorno longo — investimento pouco atrativo.")
+            k1, k2 = st.columns(2)
+            k1.metric("Retorno Mensal (Economia)", formatar_br(economia_total, prefixo="R$ "))
+            k2.metric("Payback Simples", formatar_br(payback, sufixo=" meses", decimais=1))
 
     # ---------------------------------------------------
-    # TAB 5 — DETALHES ANDAR / SALA
+    # TAB 5 — DETALHES ANDAR / SETOR
     # ---------------------------------------------------
     with tab4:
-        st.subheader("Análise detalhada")
+        st.subheader("Análise Detalhada (Drill-Down)")
+        st.caption("Identificação dos 'Vilões' de consumo citados no relatório (PROGESP, PROPLAN, 1º e 4º Andares)")
 
         col_a, col_s = st.columns(2)
 
-        # AGORA COL_A É "SETOR" (Unidade Administrativa) COM DETALHAMENTO
         with col_a:
-            st.markdown("### 🏢 Consumo por Setor")
+            st.markdown("### 🏢 Por Setor (Unidade Adm.)")
             
-            # Global Stats (Mantido)
-            qtd_por_setor = df_raw.groupby('Setor')['Quant'].sum()
-            media_aparelhos_setor = qtd_por_setor.mean()
-            st.metric("Média de Aparelhos por Unidade Adm.", formatar_br(media_aparelhos_setor, sufixo=" un.", decimais=0))
-
-            # Interatividade de Drill-down
-            st.markdown("#### 🔍 Detalhar Setor")
             lista_setores = sorted(df_raw['Setor'].unique())
-            setor_sel = st.selectbox("Selecione a Unidade Administrativa:", lista_setores, key="sel_setor_drill")
+            setor_sel = st.selectbox("Selecione o Setor:", lista_setores, key="sel_setor_drill")
 
-            # Filtra dados pelo setor selecionado
             df_sel_setor = df_raw[df_raw['Setor'] == setor_sel]
-            
             custo_setor = df_sel_setor["Custo_Consumo_R$"].sum()
-            consumo_setor = df_sel_setor["Consumo_Mensal_kWh"].sum()
             
-            c_s1, c_s2 = st.columns(2)
-            c_s1.metric("Custo do Setor", formatar_br(custo_setor, prefixo="R$ "))
-            c_s2.metric("Consumo do Setor", formatar_br(consumo_setor, sufixo=" kWh", decimais=0))
-
-            st.caption(f"Salas que compõem o setor: **{setor_sel}**")
+            st.metric(f"Custo Mensal: {setor_sel}", formatar_br(custo_setor, prefixo="R$ "))
             
-            # Agrupa por SALA dentro do SETOR selecionado
+            # Ranking de Salas dentro do Setor
             df_rooms_sector = df_sel_setor.groupby("Id_sala")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
             df_rooms_sector = df_rooms_sector.sort_values("Custo_Consumo_R$", ascending=False)
 
@@ -565,105 +508,29 @@ if not df_raw.empty:
                 use_container_width=True, hide_index=True
             )
 
-            st.divider()
-
-            # Ranking Geral em Expander (para não poluir a tela)
-            with st.expander("📊 Ver Ranking Geral de Todos os Setores"):
-                df_setor_all = df_raw.groupby("Setor")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
-                df_setor_all = df_setor_all.sort_values("Custo_Consumo_R$", ascending=False)
-                
-                st.dataframe(
-                    df_setor_all.style.format({
-                        "Consumo_Mensal_kWh": lambda x: formatar_br(x, sufixo=" kWh", decimais=0),
-                        "Custo_Consumo_R$": lambda x: formatar_br(x, prefixo="R$ ")
-                    }),
-                    use_container_width=True, hide_index=True
-                )
-
         with col_s:
-            st.markdown("### 🚪 Salas (Geral)")
+            st.markdown("### 🏬 Por Andar (Verticalização)")
+            st.caption("Pontos Críticos Relatório: 1º e 4º Andares")
 
-            lista_salas = sorted(df_raw['Id_sala'].unique())
-            sala_sel = st.selectbox("Selecione a sala:", lista_salas)
+            lista_andares = sorted(df_raw['num_andar'].unique())
+            andar_sel = st.selectbox("Selecione o Andar:", lista_andares)
 
-            df_sala = df_raw[df_raw['Id_sala'] == sala_sel]
-            custo_sala = df_sala["Custo_Consumo_R$"].sum()
-            st.metric(f"Custo Total — Sala {sala_sel}", formatar_br(custo_sala, prefixo="R$ "))
+            df_andar = df_raw[df_raw['num_andar'] == andar_sel]
+            custo_andar = df_andar["Custo_Consumo_R$"].sum()
+            st.metric(f"Custo Total — Andar {andar_sel}", formatar_br(custo_andar, prefixo="R$ "))
+
+            # Ranking de Equipamentos no Andar
+            df_andar_eq = (
+                df_andar.groupby("des_nome_generico_equipamento")["Custo_Consumo_R$"]
+                .sum().reset_index().sort_values("Custo_Consumo_R$", ascending=False).head(10)
+            )
 
             st.dataframe(
-                df_sala[["des_nome_equipamento", "Quant", "Potencia_Instalada_kW", "Custo_Consumo_R$"]]
-                .sort_values("Custo_Consumo_R$", ascending=False)
-                .style.format({
-                    "Quant": lambda x: formatar_br(x, decimais=0),
-                    "Potencia_Instalada_kW": lambda x: formatar_br(x, decimais=3),
+                df_andar_eq.style.format({
                     "Custo_Consumo_R$": lambda x: formatar_br(x, prefixo="R$ ")
                 }),
                 use_container_width=True, hide_index=True
             )
-        
-        st.divider()
-
-        # AGORA ANDAR FICA EMBAIXO, OCUPANDO LARGURA TOTAL
-        st.markdown("### 🏬 Andares")
-
-        qtd_por_andar = df_raw.groupby('num_andar')['Quant'].sum()
-        media_aparelhos = qtd_por_andar.mean()
-        st.metric("Média de Aparelhos por Andar", formatar_br(media_aparelhos, sufixo=" un.", decimais=0))
-
-        lista_andares = sorted(df_raw['num_andar'].unique())
-        andar_sel = st.selectbox("Selecione o andar:", lista_andares)
-
-        df_andar = df_raw[df_raw['num_andar'] == andar_sel]
-        custo_andar = df_andar["Custo_Consumo_R$"].sum()
-        st.metric(f"Custo Total — Andar {andar_sel}", formatar_br(custo_andar, prefixo="R$ "))
-
-        df_andar_salas = (
-            df_andar.groupby("Id_sala")["Custo_Consumo_R$"]
-            .sum().reset_index().sort_values("Custo_Consumo_R$", ascending=False)
-        )
-
-        st.dataframe(
-            df_andar_salas.style.format({
-                "Custo_Consumo_R$": lambda x: formatar_br(x, prefixo="R$ ")
-            }),
-            use_container_width=True, hide_index=True
-        )
-
-        st.divider()
-
-        st.markdown("### 🔥❄️ Gasto Relacionado a Aparelhos Térmicos e de Cozinha")
-        st.caption("Filtro: Ar Condicionado, Geladeira, Frigobar, Bebedouro, Microondas, Cafeteira, etc.")
-        
-        target_keywords = [
-            "AR CONDICIONADO", "GELADEIRA", "FRIGOBAR", "REFRIGERADOR", 
-            "BEBEDOURO", "DESUMIDIFICADOR", "VENTILADOR", "MICROONDAS", 
-            "TORRADEIRA", "CAFETEIRA", "CHALEIRA", "FOGÃO", "FORNO", 
-            "AQUECEDOR", "FOGAREIRO"
-        ]
-        
-        def is_target_appliance(nome):
-            n = str(nome).upper()
-            return any(k in n for k in target_keywords)
-        
-        df_clim = df_raw[df_raw['des_nome_generico_equipamento'].apply(is_target_appliance)].copy()
-        
-        if not df_clim.empty:
-            df_clim_g = df_clim.groupby("des_nome_generico_equipamento")[["Consumo_Mensal_kWh", "Custo_Consumo_R$"]].sum().reset_index()
-            df_clim_g = df_clim_g.sort_values("Custo_Consumo_R$", ascending=False)
-            
-            c_clim1, c_clim2 = st.columns(2)
-            c_clim1.metric("Custo Total (Selecionados)", formatar_br(df_clim['Custo_Consumo_R$'].sum(), prefixo="R$ "))
-            c_clim2.metric("Consumo Total (Selecionados)", formatar_br(df_clim['Consumo_Mensal_kWh'].sum(), sufixo=" kWh", decimais=0))
-
-            st.dataframe(
-                df_clim_g.style.format({
-                    "Consumo_Mensal_kWh": lambda x: formatar_br(x, sufixo=" kWh", decimais=0),
-                    "Custo_Consumo_R$": lambda x: formatar_br(x, prefixo="R$ ")
-                }),
-                use_container_width=True, hide_index=True
-            )
-        else:
-            st.info("Nenhum equipamento da lista específica foi identificado.")
 
 else:
-    st.warning("Carregando dados... Verifique sua conexão.")
+    st.warning("Carregando dados... Verifique sua conexão com o GitHub.")
