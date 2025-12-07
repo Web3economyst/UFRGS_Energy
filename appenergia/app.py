@@ -494,17 +494,21 @@ if not df_raw.empty:
 
         st.divider()
 
+    
+        paleta_cores = px.colors.qualitative.Bold 
+
         col_b, col_p = st.columns([1.6, 1])
+        
         with col_b:
             fig_econ = px.bar(
                 resumo,
                 x="Categoria_Macro",
                 y="Economia_R$",
                 title="Economia Potencial por Categoria (R$)",
-                color="Categoria_Macro"
+                color="Categoria_Macro",  # Define quem controla a cor
+                color_discrete_sequence=paleta_cores # Aplica a paleta
             )
-            fig_econ.update_layout(separators=",.")
-            # Formatando o texto das barras manualmente para BR
+            fig_econ.update_layout(separators=",.", showlegend=False) # Legenda opcional aqui, já que tem no eixo X
             fig_econ.update_traces(texttemplate='R$ %{y:,.2f}', textposition='outside')
             st.plotly_chart(fig_econ, use_container_width=True)
 
@@ -513,15 +517,17 @@ if not df_raw.empty:
                 resumo,
                 values="Economia_R$",
                 names="Categoria_Macro",
+                color="Categoria_Macro", # IMPORTANTE: Isso força o link da cor com a categoria
                 hole=0.4,
-                title="Distribuição da Economia"
+                title="Distribuição da Economia",
+                color_discrete_sequence=paleta_cores # Aplica a MESMA paleta
             )
             fig_pie_e.update_layout(separators=",.")
             fig_pie_e.update_traces(textinfo='percent+label')
             st.plotly_chart(fig_pie_e, use_container_width=True)
 
     # ---------------------------------------------------
-    # TAB 4 — VIABILIDADE / ROI
+    # TAB 4 — VIABILIDADE(ROI)
     # ---------------------------------------------------
     with tab3:
         st.subheader("💰 Simulador de Viabilidade — ROI do Projeto")
