@@ -243,7 +243,7 @@ if not df_raw.empty:
     if cat == 'Climatização':
         return cons * fator_sazonal_clima
     
-    return cons
+        return cons
 
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(consumo, axis=1)
     df_raw['Custo_Consumo_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_media_calculada
