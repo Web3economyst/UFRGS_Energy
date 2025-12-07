@@ -45,16 +45,27 @@ DATA_URL_INVENTARIO = "https://raw.githubusercontent.com/Web3economyst/UFRGS_Ene
 DATA_URL_OCUPACAO = "https://github.com/Web3economyst/UFRGS_Energy/raw/main/Hor%C3%A1rios.xlsx"
 
 @st.cache_data
+# ---------------------------------------------------
+# 1. CARREGAMENTO DOS DADOS (COM IMPUTAÇÃO INTELIGENTE)
+# ---------------------------------------------------
+@st.cache_data
 def load_data():
     try:
-        # INVENTÁRIO
-        # Alterado encoding para 'utf-8' para corrigir erro de leitura (0x81)
+        # Leitura com tratamento de encoding
         df_inv = pd.read_csv(DATA_URL_INVENTARIO, encoding='utf-8', on_bad_lines='skip')
         df_inv.columns = df_inv.columns.str.strip()
 
-        df_inv['Quant'] = pd.to_numeric(df_inv['Quant'], errors='coerce').fillna(1)
+        # 1. Tratamento de Quantidade (Igual ao Relatório: Vazio = 0)
+        df_inv['Quant'] = pd.to_numeric(df_inv['Quant'], errors='coerce').fillna(0)
+        
+        # 2. Tratamento Numérico da Potência
         df_inv['num_potencia'] = pd.to_numeric(df_inv['num_potencia'], errors='coerce').fillna(0)
-
+        
+        # 3. Tratamento de Textos
+        df_inv['des_nome_generico_equipamento'] = df_inv['des_nome_generico_equipamento'].astype(str).str.strip().str.upper()
+        df_inv['des_categoria'] = df_inv['des_categoria'].astype(str).str.strip()
+        
+        # Lógica de Salas e Setores
         if 'num_andar' in df_inv.columns:
             df_inv['num_andar'] = df_inv['num_andar'].astype(str).str.replace(r'\.0$', '', regex=True).replace(['nan','NaN',''], 'Não Identificado')
         else:
@@ -64,21 +75,76 @@ def load_data():
             df_inv['Id_sala'] = df_inv['Id_sala'].astype(str).replace(['nan','NaN',''], 'Não Identificado')
         else:
             df_inv['Id_sala'] = 'Não Identificado'
-        
-        # Tratamento da coluna Setor
+            
         if 'Setor' in df_inv.columns:
             df_inv['Setor'] = df_inv['Setor'].astype(str).str.strip().replace(['nan','NaN',''], 'Não Identificado')
         else:
             df_inv['Setor'] = 'Não Identificado'
 
-        # Conversão BTU -> Watts
-        def converter_watts(row):
+        # --- A MÁGICA DA IMPUTAÇÃO (Igual ao Relatório) ---
+        def estimar_potencia_real(row):
             p = row['num_potencia']
             u = str(row['des_potencia']).upper()
-            return p * 0.293 / 3.0 if 'BTU' in u else p
+            nome = row['des_nome_generico_equipamento'] # Já está em Upper
+            
+            # Se potência for 0 ou inválida, imputa média de mercado
+            if p <= 0:
+                if 'AR CONDICIONADO' in nome: return 1400.0 
+                if 'COMPUTADOR' in nome: return 200.0
+                if 'CHALEIRA' in nome: return 1200.0
+                if 'CAFETEIRA' in nome: return 800.0
+                if 'GELADEIRA' in nome: return 150.0
+                if 'LÂMPADA' in nome: return 32.0
+                return 0.0 # Se não souber o que é, mantém 0
+            
+            # Conversão de Unidades
+            if 'BTU' in u: return (p * 0.293) / 3.0
+            if 'CV' in u or 'HP' in u: return p * 735.5
+            if 'KW' in u: return p * 1000.0
+            
+            return p
 
-        df_inv['Potencia_Real_W'] = df_inv.apply(converter_watts, axis=1)
+        df_inv['Potencia_Real_W'] = df_inv.apply(estimar_potencia_real, axis=1)
         df_inv['Potencia_Total_Item_W'] = df_inv['Potencia_Real_W'] * df_inv['Quant']
+
+        # OCUPAÇÃO (Mantido igual)
+        try:
+            xls = pd.ExcelFile(DATA_URL_OCUPACAO)
+            nome_aba_dados = None
+            for aba in xls.sheet_names:
+                df_temp = pd.read_excel(xls, sheet_name=aba, nrows=5)
+                cols = [str(x).strip() for x in df_temp.columns]
+                if 'DataHora' in cols and 'EntradaSaida' in cols:
+                    nome_aba_dados = aba
+                    break
+            if nome_aba_dados is None: nome_aba_dados = xls.sheet_names[0]
+
+            df_oc = pd.read_excel(xls, sheet_name=nome_aba_dados)
+            df_oc.columns = df_oc.columns.astype(str).str.strip()
+            df_oc = df_oc.dropna(subset=['DataHora'])
+            df_oc['DataHora'] = pd.to_datetime(df_oc['DataHora'], errors='coerce')
+            df_oc = df_oc.sort_values('DataHora')
+            df_oc['Variacao'] = df_oc['EntradaSaida'].astype(str).str.upper().str[0].map({'E':1,'S':-1}).fillna(0)
+            df_oc['Data_Dia'] = df_oc['DataHora'].dt.date
+            
+            def ajustar_dia(grupo):
+                grupo = grupo.sort_values('DataHora')
+                grupo['Ocupacao_Dia'] = grupo['Variacao'].cumsum()
+                m = grupo['Ocupacao_Dia'].min()
+                if m < 0: grupo['Ocupacao_Dia'] += abs(m)
+                return grupo
+            
+            df_oc = df_oc.groupby('Data_Dia', group_keys=False).apply(ajustar_dia)
+            df_oc['Ocupacao_Acumulada'] = df_oc['Ocupacao_Dia']
+
+        except Exception:
+            df_oc = pd.DataFrame()
+
+        return df_inv, df_oc
+
+    except Exception as e:
+        st.error(f"Erro no carregamento: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 
         # OCUPAÇÃO
         try:
@@ -198,41 +264,44 @@ if not df_raw.empty:
     # FUNÇÃO DE CONSUMO COM "DUTY CYCLE" (FATOR DE USO REAL)
     def consumo(row):
         cat = row['Categoria_Macro']
+        nome = str(row['des_nome_generico_equipamento']).upper()
         
-        # Fatores de Uso (Duty Cycle) - Idênticos ao Relatório
-        fator_uso = 1.0 
-        
-        # Verifica se a sala foi marcada como 24h pelo usuário
+        # 1. Definição de Equipamentos 24h (Automático pelo nome + Salas Selecionadas)
+        is_24h = False
         if str(row['Id_sala']) in salas_24h:
+            is_24h = True
+        if 'GELADEIRA' in nome or 'FREEZER' in nome or 'SERVIDOR' in nome or 'RACK' in nome or 'NOBREAK' in nome:
+            is_24h = True
+
+        # 2. Atribuição de Horas e Fatores
+        if is_24h:
             h = 24.0
             dias = 30
-            # Em salas 24h, geladeiras ciclam (0.45), servidores são constantes (1.0)
-            if "GELADEIRA" in str(row['des_nome_generico_equipamento']).upper():
-                fator_uso = 0.45
+            # Geladeira cicla o motor (não fica 24h ligada no máximo)
+            if 'GELADEIRA' in nome or 'FREEZER' in nome:
+                fator_uso = 0.40 # Igual ao relatório
             else:
-                fator_uso = 1.00
+                fator_uso = 1.00 # Servidores/Nobreaks constantes
         else:
-            # Uso Comercial Comum
+            # Uso Comercial
             dias = dias_mes
-            
             if cat == "Climatização": 
                 h = horas_ar
-                fator_uso = 0.60 # O compressor só liga 60% do tempo
+                fator_uso = 0.60 
             elif cat == "Iluminação": 
                 h = horas_luz
-                fator_uso = 1.00 # Luz fica ligada o tempo todo
+                fator_uso = 1.00
             elif cat == "Informática": 
                 h = horas_pc
-                fator_uso = 0.80 # Computadores têm ociosidade
+                fator_uso = 0.80
             elif cat == "Eletrodomésticos": 
                 h = horas_eletro
-                fator_uso = 1.00 # Uso pontual (já definido pelas poucas horas no slider)
+                fator_uso = 1.00
             else: 
                 h = horas_outros
                 fator_uso = 0.50
 
-        # Fórmula: (Potência * Horas * Dias * Fator_Uso) / 1000
-        # Multiplicamos pelo fator sazonal apenas se for Climatização e estiver no verão
+        # Cálculo Final
         cons = (row['Potencia_Total_Item_W'] * h * dias * fator_uso) / 1000
         
         if cat == 'Climatização' and fator_sazonal_clima > 1.0:
