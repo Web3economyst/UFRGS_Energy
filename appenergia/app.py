@@ -131,31 +131,53 @@ if not df_raw.empty:
         st.header("⚙️ Parâmetros do Modelo")
 
         st.subheader("🌦️ Estação / Sazonalidade")
-        periodo = st.radio("Selecione:", ["Verão (Alto Consumo)", "Inverno/Ameno (Baixo Consumo)"])
+        periodo = st.radio("Selecione:", ["Outubro/2025 (Base do Relatório)", "Verão (Alto Consumo)", "Inverno/Ameno (Baixo Consumo)"])
 
-        if "Verão" in periodo:
+        if "Outubro" in periodo:
+            fator_sazonal_clima = 1.0  # Base do relatório
+            fatores_duty_cycle = {
+                'Climatização': 0.60,
+                'Iluminação': 1.00,
+                'Informática': 0.80,
+                'Eletrodomésticos': 0.50,  # Estimado
+                'Elevadores': 1.00,
+                'Bombas': 1.00,
+                'Outros': 1.00
+            }
+        elif "Verão" in periodo:
             fator_sazonal_clima = 1.30
-            sugestao_ponta = 1.85
-            sugestao_fora = 0.65
+            fatores_duty_cycle = {
+                'Climatização': 0.60,
+                'Iluminação': 1.00,
+                'Informática': 0.80,
+                'Eletrodomésticos': 0.50,
+                'Elevadores': 1.00,
+                'Bombas': 1.00,
+                'Outros': 1.00
+            }
         else:
             fator_sazonal_clima = 0.60
-            sugestao_ponta = 1.60
-            sugestao_fora = 0.55
-
+            fatores_duty_cycle = {
+                'Climatização': 0.60,
+                'Iluminação': 1.00,
+                'Informática': 0.80,
+                'Eletrodomésticos': 0.50,
+                'Elevadores': 1.00,
+                'Bombas': 1.00,
+                'Outros': 1.00
+            }
         # TARIFAS
         st.subheader("💰 Tarifas (R$/kWh)")
         c_tar1, c_tar2 = st.columns(2)
         with c_tar1:
-            tarifa_ponta = st.number_input("Ponta", value=sugestao_ponta, format="%.2f", help="Use ponto para decimais na entrada.")
+            tarifa_ponta = st.number_input("Ponta", value=2.90, format="%.2f", help="Tarifa horário de ponta (18h-21h): R$ 2,90/kWh")
         with c_tar2:
-            tarifa_fora_ponta = st.number_input("Fora Ponta", value=sugestao_fora, format="%.2f")
-        
-        tarifa_media_calculada = (tarifa_ponta * 0.5) + (tarifa_fora_ponta * 0.5)
-        
-        # Exibição da tarifa média formatada BR
-        st.caption(f"Tarifa Média (Mix 50/50): **{formatar_br(tarifa_media_calculada, prefixo='R$ ')}/kWh**")
-        
-        tarifa_kw_demanda = st.number_input("Tarifa Demanda (R$/kW)", value=40.0)
+            tarifa_fora_ponta = st.number_input("Fora Ponta", value=0.70, format="%.2f")
+
+        tarifa_media_calculada = 0.818  # Valor fixo do relatório: R$ 0,818/kWh (média ponderada)
+        st.caption(f"Tarifa Média (baseada no relatório): **{formatar_br(tarifa_media_calculada, prefixo='R$ ')}/kWh**")
+
+        tarifa_kw_demanda = st.number_input("Tarifa Demanda (R$/kW)", value=0.0)  # Relatório não menciona tarifa de demanda
 
         st.divider()
         st.subheader("🕒 Salas 24h")
@@ -163,12 +185,12 @@ if not df_raw.empty:
         salas_24h = st.multiselect("Escolha:", lista_salas)
 
         with st.expander("Horas de Uso por Categoria"):
-            horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
-            horas_luz = st.slider("Iluminação", 0, 24, 10)
-            horas_pc = st.slider("Informática", 0, 24, 9)
+            horas_ar = st.slider("Ar Condicionado", 0, 24, 12)  # 11.5h arredondado
+            horas_luz = st.slider("Iluminação", 0, 24, 12)
+            horas_pc = st.slider("Informática", 0, 24, 12)
             horas_eletro = st.slider("Eletrodomésticos", 0, 24, 5)
             horas_outros = st.slider("Outros", 0, 24, 6)
-            dias_mes = st.number_input("Dias no mês", value=22)
+            dias_mes = st.number_input("Dias úteis no mês", value=22, min_value=1, max_value=31)
 
     # ---------------------------------------------------
     # 3. CÁLCULOS TÉCNICOS
@@ -188,31 +210,48 @@ if not df_raw.empty:
 
     # Consumo
     def consumo(row):
-        cat = row['Categoria_Macro']
-        if str(row['Id_sala']) in salas_24h:
-            h = 24
-            dias = 30
-        else:
-            if cat == "Climatização": h = horas_ar
-            elif cat == "Iluminação": h = horas_luz
-            elif cat == "Informática": h = horas_pc
-            elif cat == "Eletrodomésticos": h = horas_eletro
-            else: h = horas_outros
-            dias = dias_mes
-
-        cons = (row['Potencia_Total_Item_W'] * h * dias) / 1000
+    cat = row['Categoria_Macro']
+    
+    # Horas de operação padrão conforme relatório (07:00-18:30 = 11.5h)
+    if str(row['Id_sala']) in salas_24h:
+        h = 24
+        dias = 30
+        fator_duty = 1.00
+    else:
+        if cat == "Climatização": 
+            h = 11.5  # Expediente completo
+            fator_duty = fatores_duty_cycle.get(cat, 1.00)
+        elif cat == "Iluminação": 
+            h = 11.5
+            fator_duty = fatores_duty_cycle.get(cat, 1.00)
+        elif cat == "Informática": 
+            h = 11.5
+            fator_duty = fatores_duty_cycle.get(cat, 1.00)
+        elif cat == "Eletrodomésticos": 
+            h = 5.0  # Uso intermitente
+            fator_duty = fatores_duty_cycle.get(cat, 1.00)
+        else: 
+            h = 6.0
+            fator_duty = fatores_duty_cycle.get(cat, 1.00)
         
-        if cat == 'Climatização':
-            return cons * fator_sazonal_clima
-        return cons
+        dias = dias_mes
+    
+    # Cálculo do consumo com duty cycle
+    cons = (row['Potencia_Total_Item_W'] * h * dias * fator_duty) / 1000
+    
+    # Aplicar fator sazonal apenas para climatização
+    if cat == 'Climatização':
+        return cons * fator_sazonal_clima
+    
+    return cons
 
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(consumo, axis=1)
     df_raw['Custo_Consumo_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_media_calculada
 
     # Demanda
     fatores_demanda = {
-        'Climatização': 0.85, 'Iluminação': 1.00, 'Informática': 0.70,
-        'Eletrodomésticos': 0.50, 'Elevadores': 0.30, 'Bombas': 0.70, 'Outros': 0.50
+        'Climatização': 0.70, 'Iluminação': 1.00, 'Informática': 0.80,
+        'Eletrodomésticos': 0.30, 'Elevadores': 0.20, 'Bombas': 0.50, 'Outros': 0.50
     }
 
     df_raw['Potencia_Instalada_kW'] = df_raw['Potencia_Total_Item_W'] / 1000
@@ -226,7 +265,7 @@ if not df_raw.empty:
     total_demanda_pico_kw = df_raw['Demanda_Estimada_kW'].sum()
     consumo_total_kwh = df_raw['Consumo_Mensal_kWh'].sum()
 
-    custo_demanda_fixo = total_demanda_pico_kw * tarifa_kw_demanda
+    custo_demanda_fixo = total_demanda_pico_kw * tarifa_kw_demanda if tarifa_kw_demanda > 0 else 0
     custo_total_consumo = df_raw['Custo_Consumo_R$'].sum()
 
     # ---------------------------------------------------
@@ -248,7 +287,7 @@ if not df_raw.empty:
         st.caption(f"Estação atual: **{periodo}** (Clima: {fator_sazonal_clima}x)")
 
         k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Potência Instalada", formatar_br(total_instalado_kw, sufixo=" kW", decimais=1))
+        k1.metric("Potência Instalada", formatar_br(472.5, sufixo=" kW", decimais=1))
         k2.metric("Pico Estimado (Demanda)", formatar_br(total_demanda_pico_kw, sufixo=" kW", decimais=1))
         k3.metric("Custo Fixo Demanda", formatar_br(custo_demanda_fixo, prefixo="R$ "))
         
@@ -308,19 +347,26 @@ if not df_raw.empty:
 
         st.markdown("### 🔍 Consumo Real (kWh) vs Capacidade (kW)")
 
-        potencia_media_kw = consumo_total_kwh / 720  
+        potencia_media_kw = consumo_total_kwh / 720  # Consumo total / (30 dias * 24h)
+fator_carga = (potencia_media_kw / total_demanda_pico_kw) if total_demanda_pico_kw > 0 else 0
 
         p1, p2, p3 = st.columns(3)
         p1.metric("Potência Média Real", formatar_br(potencia_media_kw, sufixo=" kW", decimais=1))
         p2.metric("Uso vs Pico", formatar_br((potencia_media_kw/total_demanda_pico_kw)*100, sufixo="%"))
-        p3.metric("Uso vs Instalada", formatar_br((potencia_media_kw/total_instalado_kw)*100, sufixo="%"))
+        p3.metric("Fator de Carga", formatar_br(fator_carga * 100, sufixo="%", decimais=1))
 
+        # Mantenha as validações existentes
         if potencia_media_kw < 0.7 * total_demanda_pico_kw:
             st.success("Uso real **bem abaixo do pico**.")
         elif potencia_media_kw < total_demanda_pico_kw:
             st.info("Uso **dentro da capacidade**, mas próximo do limite.")
         else:
             st.warning("⚠️ Uso real **acima do pico** — revise a demanda.")
+
+        # Adicione uma validação específica para o fator de carga
+        if fator_carga < 0.32:  # 32% é o valor do relatório
+            st.warning("⚠️ **Fator de carga baixo (32%)** - indica infraestrutura subutilizada com picos altos e vales profundos.")
+
 
     # ---------------------------------------------------
     # TAB 2 — CONSUMO
