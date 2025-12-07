@@ -211,39 +211,39 @@ if not df_raw.empty:
     # Consumo
     def consumo(row):
         cat = row['Categoria_Macro']
+        
     
     # Horas de operação padrão conforme relatório (07:00-18:30 = 11.5h)
-    if str(row['Id_sala']) in salas_24h:
-        h = 24
-        dias = 30
-        fator_duty = 1.00
-    else:
-        if cat == "Climatização": 
-            h = 11.5  # Expediente completo
-            fator_duty = fatores_duty_cycle.get(cat, 1.00)
-        elif cat == "Iluminação": 
-            h = 11.5
-            fator_duty = fatores_duty_cycle.get(cat, 1.00)
-        elif cat == "Informática": 
-            h = 11.5
-            fator_duty = fatores_duty_cycle.get(cat, 1.00)
-        elif cat == "Eletrodomésticos": 
-            h = 5.0  # Uso intermitente
-            fator_duty = fatores_duty_cycle.get(cat, 1.00)
-        else: 
-            h = 6.0
-            fator_duty = fatores_duty_cycle.get(cat, 1.00)
+        if str(row['Id_sala']) in salas_24h:
+            h = 24
+            dias = 30
+            fator_duty = 1.00
+        else:
+            if cat == "Climatização": 
+                h = 11.5  # Expediente completo
+                fator_duty = fatores_duty_cycle.get(cat, 1.00)
+            elif cat == "Iluminação": 
+                h = 11.5
+                fator_duty = fatores_duty_cycle.get(cat, 1.00)
+            elif cat == "Informática": 
+                h = 11.5
+                fator_duty = fatores_duty_cycle.get(cat, 1.00)
+            elif cat == "Eletrodomésticos": 
+                h = 5.0  # Uso intermitente
+                fator_duty = fatores_duty_cycle.get(cat, 1.00)
+            else: 
+                h = 6.0
+                fator_duty = fatores_duty_cycle.get(cat, 1.00)
         
-        dias = dias_mes
+            dias = dias_mes
     
     # Cálculo do consumo com duty cycle
-    cons = (row['Potencia_Total_Item_W'] * h * dias * fator_duty) / 1000
+        cons = (row['Potencia_Total_Item_W'] * h * dias * fator_duty) / 1000
     
     # Aplicar fator sazonal apenas para climatização
-    if cat == 'Climatização':
-        return cons * fator_sazonal_clima
-    
-        return cons
+        if cat == 'Climatização':
+            return cons * fator_sazonal_clima
+            return cons
 
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(consumo, axis=1)
     df_raw['Custo_Consumo_R$'] = df_raw['Consumo_Mensal_kWh'] * tarifa_media_calculada
