@@ -135,13 +135,13 @@ if not df_raw.empty:
 
         # Valores sugeridos ajustados para a realidade tarifária (Grupo A4 com impostos estimados)
         if "Verão" in periodo:
-            fator_sazonal_clima = 1.30
-            sugestao_ponta = 2.90     # Aumentado para refletir custo real da ponta
-            sugestao_fora = 0.70      # Ajustado para ~R$0,70
+            fator_sazonal_clima = 1.00 # 1.0 pois a carga instalada já considera o nominal
+            sugestao_ponta = 2.90      # Valor do Relatório
+            sugestao_fora = 0.70       # Valor do Relatório
         else:
             fator_sazonal_clima = 0.60
-            sugestao_ponta = 2.60
-            sugestao_fora = 0.65
+            sugestao_ponta = 2.90
+            sugestao_fora = 0.70
 
         # TARIFAS
         st.subheader("💰 Tarifas (R$/kWh)")
@@ -167,15 +167,17 @@ if not df_raw.empty:
         st.divider()
         st.subheader("🕒 Salas 24h")
         lista_salas = sorted(df_raw['Id_sala'].unique().astype(str))
-        salas_24h = st.multiselect("Escolha:", lista_salas)
+        salas_24h = st.multiselect("Salas 24h (Servidores/Geladeiras):", lista_salas)
 
-        with st.expander("Horas de Uso por Categoria"):
-            horas_ar = st.slider("Ar Condicionado", 0, 24, 8)
-            horas_luz = st.slider("Iluminação", 0, 24, 10)
-            horas_pc = st.slider("Informática", 0, 24, 9)
-            horas_eletro = st.slider("Eletrodomésticos", 0, 24, 5)
-            horas_outros = st.slider("Outros", 0, 24, 6)
-            dias_mes = st.number_input("Dias no mês", value=22)
+        with st.expander("Ajustar Horas de Uso", expanded=True):
+        # AQUI ESTÁ O SEGREDO: MUDAMOS O 'value' PARA 11.5 (Janela 07:00 as 18:30)
+        # E usamos step=0.5 para permitir meias horas
+            horas_ar = st.slider("Ar Condicionado", 0.0, 24.0, 11.5, step=0.5)
+            horas_luz = st.slider("Iluminação", 0.0, 24.0, 11.5, step=0.5)
+            horas_pc = st.slider("Informática", 0.0, 24.0, 11.5, step=0.5)
+            horas_eletro = st.slider("Eletrodomésticos", 0.0, 24.0, 1.0, step=0.5) # Eletro é uso rápido
+            horas_outros = st.slider("Outros", 0.0, 24.0, 11.5, step=0.5)
+            dias_mes = st.number_input("Dias no mês", value=22) # Padrão comercial
 
     # ---------------------------------------------------
     # 3. CÁLCULOS TÉCNICOS
@@ -193,44 +195,48 @@ if not df_raw.empty:
 
     df_raw['Categoria_Macro'] = df_raw['des_categoria'].apply(agrupar)
 
-    # Consumo
-    # AJUSTE 2: FUNÇÃO CONSUMO COM DUTY CYCLE (FATOR DE USO)
+    # FUNÇÃO DE CONSUMO COM "DUTY CYCLE" (FATOR DE USO REAL)
     def consumo(row):
         cat = row['Categoria_Macro']
         
-        # Fatores de Uso (Duty Cycle) - Baseado em engenharia
-        # Ar não liga o compressor 100% do tempo; PC não usa 100% da CPU.
+        # Fatores de Uso (Duty Cycle) - Idênticos ao Relatório
         fator_uso = 1.0 
         
+        # Verifica se a sala foi marcada como 24h pelo usuário
         if str(row['Id_sala']) in salas_24h:
-            h = 24
+            h = 24.0
             dias = 30
-            # Geladeiras/Servidores em salas 24h
-            if cat == "Eletrodomésticos" or "SERV" in str(row['des_nome_generico_equipamento']).upper():
-                fator_uso = 0.45 # Motor de geladeira cicla
+            # Em salas 24h, geladeiras ciclam (0.45), servidores são constantes (1.0)
+            if "GELADEIRA" in str(row['des_nome_generico_equipamento']).upper():
+                fator_uso = 0.45
+            else:
+                fator_uso = 1.00
         else:
+            # Uso Comercial Comum
+            dias = dias_mes
+            
             if cat == "Climatização": 
                 h = horas_ar
-                fator_uso = 0.60 # Ciclo do compressor (60% ligado / 40% ventilando)
+                fator_uso = 0.60 # O compressor só liga 60% do tempo
             elif cat == "Iluminação": 
                 h = horas_luz
-                fator_uso = 1.00
+                fator_uso = 1.00 # Luz fica ligada o tempo todo
             elif cat == "Informática": 
                 h = horas_pc
-                fator_uso = 0.80 # Ociosidade / Bloqueio de tela
+                fator_uso = 0.80 # Computadores têm ociosidade
             elif cat == "Eletrodomésticos": 
                 h = horas_eletro
-                fator_uso = 0.50 # Microondas/Chaleira não ficam ligados direto
+                fator_uso = 1.00 # Uso pontual (já definido pelas poucas horas no slider)
             else: 
                 h = horas_outros
                 fator_uso = 0.50
-            dias = dias_mes
 
         # Fórmula: (Potência * Horas * Dias * Fator_Uso) / 1000
+        # Multiplicamos pelo fator sazonal apenas se for Climatização e estiver no verão
         cons = (row['Potencia_Total_Item_W'] * h * dias * fator_uso) / 1000
         
-        if cat == 'Climatização':
-            return cons * fator_sazonal_clima
+        if cat == 'Climatização' and fator_sazonal_clima > 1.0:
+             return cons * fator_sazonal_clima
         return cons
 
     df_raw['Consumo_Mensal_kWh'] = df_raw.apply(consumo, axis=1)
