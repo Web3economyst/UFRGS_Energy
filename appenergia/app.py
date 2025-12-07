@@ -210,7 +210,7 @@ if not df_raw.empty:
 
     # Consumo
     def consumo(row):
-    cat = row['Categoria_Macro']
+        cat = row['Categoria_Macro']
     
     # Horas de operação padrão conforme relatório (07:00-18:30 = 11.5h)
     if str(row['Id_sala']) in salas_24h:
