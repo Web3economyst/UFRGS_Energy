@@ -493,9 +493,17 @@ if not df_raw.empty:
         )
 
         st.divider()
-
     
-        paleta_cores = px.colors.qualitative.Bold 
+        cores_personalizadas = {
+            "Climatização": "#0068C9",      # Azul Escuro (característico do Streamlit)
+            "Eletrodomésticos": "#83C9FF",  # Azul Claro
+            "Iluminação": "#FF2B2B",        # Vermelho
+            "Informática": "#FFABAB",       # Rosa/Salmão
+            "Outros": "#29B09D",            # Verde Água / Teal
+            # Adicionei cores extras caso apareçam categorias que não estavam no print:
+            "Elevadores": "#FFD700",        
+            "Bombas": "#808080"
+        }
 
         col_b, col_p = st.columns([1.6, 1])
         
@@ -505,10 +513,12 @@ if not df_raw.empty:
                 x="Categoria_Macro",
                 y="Economia_R$",
                 title="Economia Potencial por Categoria (R$)",
-                color="Categoria_Macro",  # Define quem controla a cor
-                color_discrete_sequence=paleta_cores # Aplica a paleta
+                text="Economia_R$",
+                color="Categoria_Macro",  # Link para a cor
+                color_discrete_map=cores_personalizadas # USA O MAPA, NÃO A SEQUÊNCIA
             )
-            fig_econ.update_layout(separators=",.", showlegend=False) # Legenda opcional aqui, já que tem no eixo X
+            fig_econ.update_layout(separators=",.", showlegend=False) 
+            # Ajuste para formatar o R$ nas barras
             fig_econ.update_traces(texttemplate='R$ %{y:,.2f}', textposition='outside')
             st.plotly_chart(fig_econ, use_container_width=True)
 
@@ -517,10 +527,10 @@ if not df_raw.empty:
                 resumo,
                 values="Economia_R$",
                 names="Categoria_Macro",
-                color="Categoria_Macro", # IMPORTANTE: Isso força o link da cor com a categoria
+                color="Categoria_Macro", # Link para a cor
                 hole=0.4,
                 title="Distribuição da Economia",
-                color_discrete_sequence=paleta_cores # Aplica a MESMA paleta
+                color_discrete_map=cores_personalizadas # USA O MESMO MAPA
             )
             fig_pie_e.update_layout(separators=",.")
             fig_pie_e.update_traces(textinfo='percent+label')
