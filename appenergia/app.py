@@ -547,7 +547,6 @@ if not df_raw.empty:
         with col_l:
             st.markdown("### Parâmetros do Projeto")
             
-            # Inputs continuam padrão Python (ponto), mas o display pode ser ajustado na mente do usuário
             investimento = st.number_input(
                 "Orçamento disponível (R$):",
                 value=50000.0,
@@ -576,12 +575,12 @@ if not df_raw.empty:
             qtd_pc = df_pc["Quant"].sum()
 
             # AJUSTE 3: CÁLCULO DA POTÊNCIA MÉDIA REAL DO INVENTÁRIO (W)
-            # Evita usar constantes fixas. Usa a média do que foi cadastrado.
-            media_w_luz = df_luz["Potencia_Real_W"].mean() if not df_luz.empty else 30.0
+            # Ajustei os fallbacks para bater com o relatório (32W Lâmpada, 1400W Ar)
+            media_w_luz = df_luz["Potencia_Real_W"].mean() if not df_luz.empty else 32.0
             media_w_ar = df_ar["Potencia_Real_W"].mean() if not df_ar.empty else 1400.0
             media_w_pc = df_pc["Potencia_Real_W"].mean() if not df_pc.empty else 200.0
 
-            # Lógica de investimento (Mantida a lógica de distribuição de verba)
+            # Lógica de investimento
             max_inv_luz = qtd_luz * custo_led
             inv_luz = min(investimento, max_inv_luz)
             sobra_1 = investimento - inv_luz
@@ -604,17 +603,20 @@ if not df_raw.empty:
         st.divider()
 
         st.markdown("### 📉 Economia Mensal Estimada")
-        st.caption("Considerando a tarifa média calculada (50% Ponta / 50% Fora Ponta)")
+        
+        # TEXTO CORRIGIDO: Mostra o valor real da tarifa usada no cálculo
+        st.caption(f"Base de Cálculo: Tarifa Média Ponderada (**{formatar_br(tarifa_media_calculada, prefixo='R$ ')}/kWh**).")
 
         # CÁLCULO DE ECONOMIA REVISADO
         # Economia = Qtd * (Potencia_Antiga_kW - Potencia_Nova_kW) * Horas * Dias * Tarifa
         
         # Lâmpadas: Assume LED novo = 18W (0.018 kW) ou 50% de redução
         kwh_old_luz = (media_w_luz / 1000)
-        kwh_new_luz = kwh_old_luz * 0.40 # Assume 60% de redução (LED)
+        kwh_new_luz = kwh_old_luz * 0.50 # Assume 50% de redução (LED)
         eco_luz = luz_trocadas * ((kwh_old_luz - kwh_new_luz) * horas_luz * dias_mes * tarifa_media_calculada)
 
-        # Ar Condicionado: Assume Inverter economiza 35% sobre a média real (considerando Duty Cycle 0.6)
+        # Ar Condicionado: Assume Inverter economiza 35% sobre a média real
+        # FATOR DE USO 0.60 APLICADO AQUI TAMBÉM (CRÍTICO)
         kwh_old_ar = (media_w_ar / 1000) * 0.60 # Duty Cycle Antigo
         kwh_new_ar = kwh_old_ar * 0.65 # Redução de 35% no consumo real
         eco_ar = ar_trocados * ((kwh_old_ar - kwh_new_ar) * horas_ar * dias_mes * tarifa_media_calculada)
@@ -624,7 +626,7 @@ if not df_raw.empty:
         kwh_new_pc = (0.035) * 0.90 # Mini PC consumo médio 35W
         eco_pc = pc_trocados * ((kwh_old_pc - kwh_new_pc) * horas_pc * dias_mes * tarifa_media_calculada)
         
-        # Proteção para não dar economia negativa se o PC novo consumir mais que o velho (improvável)
+        # Proteção para não dar economia negativa
         eco_pc = max(eco_pc, 0)
 
         economia_total = eco_luz + eco_ar + eco_pc
@@ -634,12 +636,12 @@ if not df_raw.empty:
         k1.metric("Economia Mensal", formatar_br(economia_total, prefixo="R$ "))
         k2.metric("Payback Estimado", formatar_br(payback, sufixo=" meses", decimais=1))
 
-        if payback < 12:
-            st.success("🔋 Excelente viabilidade — retorno inferior a 1 ano.")
+        if payback < 18:
+            st.success("🔋 Excelente viabilidade — retorno rápido (< 1,5 anos).")
         elif payback < 36:
-            st.info("Boa viabilidade — retorno moderado.")
+            st.info("⚡ Viabilidade Padrão — retorno médio (1,5 a 3 anos).")
         else:
-            st.warning("Retorno longo — investimento pouco atrativo.")
+            st.warning("⚠️ Retorno Longo (> 3 anos) — Reavaliar prioridades.")
 
     # ---------------------------------------------------
     # TAB 5 — DETALHES ANDAR / SALA
